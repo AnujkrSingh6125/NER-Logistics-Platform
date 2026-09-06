@@ -23,7 +23,9 @@ import {
   ArrowRight,
   KeyRound,
   ArrowLeft,
-  RotateCcw
+  Building2,
+  Sparkles,
+  ChevronRight
 } from 'lucide-react';
 import MountainLogo from '@/components/MountainLogo';
 
@@ -47,7 +49,7 @@ export default function LoginPage({ onAuthSuccess }) {
   const [loading, setLoading] = useState(false);
   const hasRedirectedRef = useRef(false);
 
-  // If already authenticated and on login page, softly navigate to dashboard once without full page reload
+  // If already authenticated, redirect to dashboard
   useEffect(() => {
     if (user && !authLoading && !hasRedirectedRef.current) {
       hasRedirectedRef.current = true;
@@ -230,7 +232,7 @@ export default function LoginPage({ onAuthSuccess }) {
 
             setFormMsg({
               type: 'success',
-              text: '[✓] Operator profile re-created and authenticated! Launching Tactical Center...',
+              text: '[✓] Operator profile authenticated! Launching Tactical Center...',
             });
 
             if (onAuthSuccess && logData?.session) {
@@ -244,14 +246,14 @@ export default function LoginPage({ onAuthSuccess }) {
           } else {
             setFormMsg({
               type: 'error',
-              text: 'This email is already registered with a different passcode. Please switch to the "Sign In" tab to log in, or delete the user in Supabase Authentication -> Users to start fresh.',
+              text: 'This email is already registered with a different passcode. Please switch to "Sign In" to log in.',
             });
             setLoading(false);
             return;
           }
         }
 
-        // If immediate session created (e.g. email confirmations auto-confirmed in Supabase settings)
+        // If immediate session created (e.g. email confirmations disabled or pre-verified)
         if (data?.session && data?.user) {
           try {
             await supabase.from('driver_profiles').upsert({
@@ -280,7 +282,7 @@ export default function LoginPage({ onAuthSuccess }) {
           }, 500);
           return;
         } else {
-          // Transition into the 6-Digit Email Verification Screen
+          // Transition into 6-Digit Email Verification Screen
           setIsVerifyingOtp(true);
           setCountdown(60);
           setCanResend(false);
@@ -303,7 +305,6 @@ export default function LoginPage({ onAuthSuccess }) {
         });
 
         if (error) {
-          // Check for unconfirmed email error
           if (error.message?.toLowerCase().includes('email not confirmed') || error.message?.toLowerCase().includes('not confirmed')) {
             setFormMsg({
               type: 'error',
@@ -322,7 +323,7 @@ export default function LoginPage({ onAuthSuccess }) {
         const authenticatedUser = data?.user || data?.session?.user;
 
         if (authenticatedUser) {
-          // Verify or auto-provision driver profile in public.driver_profiles
+          // Verify or auto-provision driver profile
           const { data: profileRow } = await supabase
             .from('driver_profiles')
             .select('id')
@@ -351,12 +352,10 @@ export default function LoginPage({ onAuthSuccess }) {
             text: '[✓] Operator authenticated. Launching Tactical Center...',
           });
 
-          // 1. Notify parent AuthGuard if passed as a prop
           if (onAuthSuccess && data?.session) {
             onAuthSuccess(data.session);
           }
 
-          // 2. Perform a clean hard redirect to clear auth component state and hydrate dashboard
           setTimeout(() => {
             window.location.replace('/');
           }, 500);
@@ -484,17 +483,12 @@ export default function LoginPage({ onAuthSuccess }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#070d18] text-slate-100 flex flex-col justify-between relative overflow-hidden font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
+    <div className="min-h-screen bg-[#070d18] text-slate-100 flex flex-col justify-between relative overflow-x-hidden font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
       
       {/* 1. ATMOSPHERIC SUNSET MOUNTAIN BACKGROUND */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {/* Sky Sunset Gradient */}
         <div className="absolute inset-0 bg-gradient-to-b from-[#060b14] via-[#09152b] to-[#12284c] opacity-90" />
-        
-        {/* Sunset Horizon Glow */}
         <div className="absolute top-1/4 left-1/3 w-[800px] h-[500px] bg-gradient-to-r from-orange-500/10 via-rose-500/15 to-blue-600/20 rounded-full blur-[140px]" />
-        
-        {/* Mountain Horizon Silhouettes */}
         <div className="absolute bottom-0 inset-x-0 h-[450px] bg-gradient-to-t from-[#040810] via-[#060d1b]/80 to-transparent" />
         
         {/* Topographic Contour Lines SVG */}
@@ -505,148 +499,112 @@ export default function LoginPage({ onAuthSuccess }) {
           <path d="M-100 650 C500 580, 900 800, 1300 680 C1450 620, 1550 720, 1600 700" strokeWidth="1" />
         </svg>
 
-        {/* Ambient Star & Light Nodes */}
         <div className="absolute top-20 left-1/4 w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#22d3ee] animate-pulse" />
         <div className="absolute top-36 left-2/3 w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_8px_#f59e0b] animate-ping" />
         <div className="absolute top-48 left-1/2 w-1 h-1 rounded-full bg-blue-300 shadow-[0_0_6px_#93c5fd]" />
       </div>
 
-      {/* 2. MAIN CONTENT GRID (Hero Left + Auth Card Center/Right) */}
-      <main className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-8 py-8 lg:py-12 flex-1 flex items-center">
-        <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
-          
-          {/* ================= LEFT HERO COLUMN ================= */}
-          <div className="lg:col-span-5 space-y-6 sm:space-y-8 animate-fadeIn">
-            
-            {/* Platform Brand Identity Header */}
-            <Link href="/" className="inline-flex items-center space-x-3 group">
-              <MountainLogo className="w-11 h-11 drop-shadow-md group-hover:scale-105 transition-transform" />
-              <div>
-                <span className="text-xl font-black tracking-tight text-white font-sans block group-hover:text-cyan-400 transition-colors">
-                  AshtaMarg
-                </span>
-                <span className="text-[11px] font-medium text-cyan-400/90 tracking-wide">
-                  Tactical Logistics • 8 NER States
-                </span>
-              </div>
-            </Link>
-
-            {/* Tagline Badge */}
-            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-xs font-mono font-bold tracking-wider shadow-inner">
-              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-              <span>SAFER REGIONS. STRONGER TOMORROW.</span>
-            </div>
-
-            {/* Main Headline */}
-            <div className="space-y-3">
-              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-white tracking-tight leading-[1.15]">
-                Ground Intelligence for a{' '}
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-300 to-blue-500">
-                  Safer Northeast
-                </span>
-              </h1>
-              <p className="text-sm text-slate-300 leading-relaxed font-sans max-w-lg">
-                Real-time logging, coordination and disaster supply transit access for a more resilient Northeast India.
-              </p>
-            </div>
-
-            {/* 4 Feature Badges */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              
-              <div className="bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-cyan-500/40 rounded-2xl p-3 text-center space-y-1.5 transition-all group backdrop-blur-md">
-                <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mx-auto text-cyan-400 group-hover:scale-110 transition-transform">
-                  <Shield className="w-4 h-4" />
-                </div>
-                <div className="text-[11px] font-bold text-slate-200">Disaster Response</div>
-              </div>
-
-              <div className="bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-cyan-500/40 rounded-2xl p-3 text-center space-y-1.5 transition-all group backdrop-blur-md">
-                <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center mx-auto text-blue-400 group-hover:scale-110 transition-transform">
-                  <Truck className="w-4 h-4" />
-                </div>
-                <div className="text-[11px] font-bold text-slate-200">Supply Tracking</div>
-              </div>
-
-              <div className="bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-cyan-500/40 rounded-2xl p-3 text-center space-y-1.5 transition-all group backdrop-blur-md">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400 group-hover:scale-110 transition-transform">
-                  <Users className="w-4 h-4" />
-                </div>
-                <div className="text-[11px] font-bold text-slate-200">Field Coordination</div>
-              </div>
-
-              <div className="bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-cyan-500/40 rounded-2xl p-3 text-center space-y-1.5 transition-all group backdrop-blur-md">
-                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center mx-auto text-indigo-400 group-hover:scale-110 transition-transform">
-                  <BarChart3 className="w-4 h-4" />
-                </div>
-                <div className="text-[11px] font-bold text-slate-200">Real-time Insights</div>
-              </div>
-
-            </div>
-
-            {/* 8 NER States Coverage Block */}
-            <div className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-md space-y-3">
-              <div className="flex items-center justify-between text-xs font-mono text-slate-400 pb-2 border-b border-slate-800">
-                <span className="font-bold text-slate-200 uppercase flex items-center space-x-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>8 NER STATES COVERAGE</span>
-                </span>
-                <span className="text-[10px] text-emerald-400 font-bold flex items-center space-x-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>50 STRATEGIC HUBS</span>
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-y-1.5 gap-x-4 text-xs font-mono text-slate-300">
-                {NER_STATES.map((state) => (
-                  <div key={state} className="flex items-center space-x-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_#22d3ee]" />
-                    <span className="hover:text-cyan-300 transition-colors cursor-default">{state}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Watermark Quote */}
-            <div className="pt-2">
-              <span className="text-sm font-serif italic text-slate-400/80 tracking-wide">
-                People Safer Together
-              </span>
-            </div>
-
+      {/* 2. TOP MOBILE / DESKTOP APP BRAND BAR */}
+      <header className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-8 pt-4 sm:pt-6 flex items-center justify-between">
+        <Link href="/" className="inline-flex items-center space-x-2.5 group">
+          <MountainLogo className="w-9 h-9 sm:w-10 sm:h-10 drop-shadow-md group-hover:scale-105 transition-transform" />
+          <div>
+            <span className="text-lg sm:text-xl font-black tracking-tight text-white font-sans block group-hover:text-cyan-400 transition-colors leading-tight">
+              AshtaMarg
+            </span>
+            <span className="text-[10px] sm:text-[11px] font-medium text-cyan-400/90 tracking-wide">
+              Tactical Logistics • 8 NER States
+            </span>
           </div>
+        </Link>
 
-          {/* ================= CENTER / RIGHT AUTHENTICATION CARD ================= */}
-          <div className="lg:col-span-4 flex justify-center">
+        {/* Nodal Officer Portal Fast Link */}
+        <Link
+          href="/nodal-login"
+          className="px-3 py-1.5 rounded-xl bg-amber-950/60 hover:bg-amber-900/80 border border-amber-500/40 text-amber-300 text-[11px] font-mono font-bold flex items-center space-x-1.5 transition-all shadow-xs group"
+        >
+          <Building2 className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
+          <span className="hidden xs:inline">Nodal Officer</span>
+          <span>Portal</span>
+          <ChevronRight className="w-3 h-3 text-amber-400/80" />
+        </Link>
+      </header>
+
+      {/* 3. MAIN CONTENT (Mobile-First Layout: Auth Card First on Mobile) */}
+      <main className="relative z-10 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-8 lg:py-12 flex-1 flex items-center">
+        <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-12 items-center">
+          
+          {/* ========================================================================= */}
+          {/* AUTHENTICATION CARD (Order 1 on Mobile, Center/Right Span 5 on Desktop)    */}
+          {/* ========================================================================= */}
+          <div className="order-1 lg:order-2 lg:col-span-6 xl:col-span-5 flex justify-center w-full">
             
-            {/* Tactical Glassmorphic Card */}
-            <div className="w-full max-w-md bg-slate-900/85 backdrop-blur-2xl border border-cyan-500/40 rounded-3xl p-6 sm:p-8 shadow-[0_0_50px_rgba(6,182,212,0.18)] space-y-5 relative overflow-hidden">
+            {/* Mobile-Optimized Glassmorphic Card */}
+            <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-2xl border border-cyan-500/40 rounded-3xl p-5 sm:p-7 shadow-[0_0_50px_rgba(6,182,212,0.18)] space-y-4 relative overflow-hidden">
               
-              {/* Subtle Card Background Radial Highlights */}
+              {/* Radial Highlight Backdrops */}
               <div className="absolute top-0 right-0 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
               <div className="absolute bottom-0 left-0 w-48 h-48 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
 
-              {/* Top Header Badge & Title */}
-              <div className="text-center space-y-2 relative z-10">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 border border-cyan-400/40 flex items-center justify-center mx-auto text-white shadow-[0_0_20px_rgba(6,182,212,0.35)]">
-                  {isVerifyingOtp ? <KeyRound className="w-6 h-6" /> : <Shield className="w-6 h-6" />}
+              {/* Segmented Sign In / Register Tab Switcher (Prominent & Thumb-Friendly) */}
+              {!isVerifyingOtp && (
+                <div className="grid grid-cols-2 p-1 bg-slate-950/80 rounded-2xl border border-slate-800 font-mono text-xs font-bold shadow-inner relative z-10">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsRegistering(false);
+                      setFormMsg({ type: null, text: '' });
+                    }}
+                    className={`py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      !isRegistering
+                        ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-md font-bold'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Sign In</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsRegistering(true);
+                      setFormMsg({ type: null, text: '' });
+                    }}
+                    className={`py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      isRegistering
+                        ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-md font-bold'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>Create Profile</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Header Title & Subtitle */}
+              <div className="text-center space-y-1 relative z-10 pt-1">
+                <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 border border-cyan-400/40 flex items-center justify-center mx-auto text-white shadow-[0_0_20px_rgba(6,182,212,0.35)]">
+                  {isVerifyingOtp ? <KeyRound className="w-5 h-5" /> : isRegistering ? <Truck className="w-5 h-5" /> : <Shield className="w-5 h-5" />}
                 </div>
 
-                <h2 className="text-2xl sm:text-3xl font-black font-sans text-white tracking-tight">
+                <h2 className="text-xl sm:text-2xl font-black font-sans text-white tracking-tight pt-1">
                   {isVerifyingOtp ? (
-                    <>Confirm <span className="text-cyan-400">OTP</span></>
+                    <>Verify <span className="text-cyan-400">Security OTP</span></>
                   ) : isRegistering ? (
-                    <>Create <span className="text-cyan-400">Profile</span></>
+                    <>Register <span className="text-cyan-400">Field Driver</span></>
                   ) : (
-                    <>Welcome <span className="text-cyan-400">Back</span></>
+                    <>Driver <span className="text-cyan-400">Portal Login</span></>
                   )}
                 </h2>
                 
-                <p className="text-xs text-slate-400 font-sans">
+                <p className="text-[11px] sm:text-xs text-slate-400 font-sans leading-relaxed">
                   {isVerifyingOtp 
                     ? 'Enter the 6-digit confirmation code sent to your email' 
                     : isRegistering 
-                    ? 'Complete all fields to register vehicle & operator profile' 
-                    : 'Sign in to access tactical transit and hazard command'}
+                    ? 'Register vehicle & operator profile for NER relief corridors' 
+                    : 'Enter registered credentials to access tactical navigation'}
                 </p>
               </div>
 
@@ -668,17 +626,17 @@ export default function LoginPage({ onAuthSuccess }) {
                 </div>
               )}
 
-              {/* OTP VERIFICATION VIEW */}
+              {/* 1. OTP VERIFICATION SCREEN */}
               {isVerifyingOtp ? (
                 <form onSubmit={handleVerifyOtp} className="space-y-4 font-mono relative z-10">
                   
                   <div>
                     <label className="block text-[11px] font-mono font-bold uppercase text-slate-400 mb-2 text-center">
-                      6-Digit Security Token *
+                      6-Digit Confirmation Token *
                     </label>
                     
-                    {/* Segmented OTP Input Boxes */}
-                    <div className="flex items-center justify-between gap-1.5" onPaste={handleOtpPaste}>
+                    {/* Responsive 6-Box OTP Inputs */}
+                    <div className="flex items-center justify-center gap-1.5 sm:gap-2.5 max-w-xs mx-auto" onPaste={handleOtpPaste}>
                       {otpToken.map((digit, idx) => (
                         <input
                           key={idx}
@@ -688,22 +646,18 @@ export default function LoginPage({ onAuthSuccess }) {
                           inputMode="numeric"
                           value={digit}
                           onChange={(e) => handleOtpChange(idx, e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Backspace' && !otpToken[idx] && idx > 0) {
-                              otpInputRefs.current[idx - 1]?.focus();
-                            }
-                          }}
-                          className="w-11 h-12 text-center bg-slate-950 border border-slate-700 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl text-lg font-mono font-bold text-cyan-400 focus:outline-none transition-all shadow-inner"
+                          onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                          className="w-10 sm:w-12 h-12 sm:h-13 text-center bg-slate-950 border border-slate-700 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/30 rounded-xl text-lg font-mono font-bold text-cyan-400 focus:outline-none transition-all shadow-inner"
                         />
                       ))}
                     </div>
                   </div>
 
-                  {/* Submit OTP Action */}
+                  {/* Confirm Action Button */}
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full py-3.5 mt-2 bg-gradient-to-r from-cyan-400 via-sky-500 to-blue-600 hover:from-cyan-300 hover:to-blue-500 disabled:opacity-50 text-slate-950 font-bold font-mono text-xs uppercase tracking-wider rounded-2xl transition-all shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full min-h-[48px] py-3 bg-gradient-to-r from-cyan-400 via-sky-500 to-blue-600 hover:from-cyan-300 hover:to-blue-500 disabled:opacity-50 text-slate-950 font-bold font-mono text-xs uppercase tracking-wider rounded-2xl transition-all shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {loading ? (
                       <>
@@ -712,7 +666,7 @@ export default function LoginPage({ onAuthSuccess }) {
                       </>
                     ) : (
                       <>
-                        <span>Confirm & Activate Account</span>
+                        <span>Activate & Launch Dashboard</span>
                         <ArrowRight className="w-4 h-4 text-slate-950" />
                       </>
                     )}
@@ -726,7 +680,7 @@ export default function LoginPage({ onAuthSuccess }) {
                         setIsVerifyingOtp(false);
                         setFormMsg({ type: null, text: '' });
                       }}
-                      className="text-slate-400 hover:text-slate-200 transition-colors cursor-pointer flex items-center gap-1"
+                      className="text-slate-400 hover:text-slate-200 transition-colors cursor-pointer flex items-center gap-1 py-1"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" />
                       <span>Back to Form</span>
@@ -736,7 +690,7 @@ export default function LoginPage({ onAuthSuccess }) {
                       type="button"
                       onClick={handleResendOtp}
                       disabled={!canResend}
-                      className={`font-mono text-[11px] ${canResend ? 'text-cyan-400 hover:text-cyan-300 cursor-pointer font-bold' : 'text-slate-600 cursor-not-allowed'}`}
+                      className={`font-mono text-[11px] py-1 ${canResend ? 'text-cyan-400 hover:text-cyan-300 cursor-pointer font-bold' : 'text-slate-600 cursor-not-allowed'}`}
                     >
                       {canResend ? 'Resend Code' : `Resend in ${countdown}s`}
                     </button>
@@ -744,10 +698,10 @@ export default function LoginPage({ onAuthSuccess }) {
 
                 </form>
               ) : (
-                /* AUTHENTICATION FORM: SIGN IN / SIGN UP */
-                <form onSubmit={handleAuth} autoComplete="off" className="space-y-3.5 font-sans relative z-10">
+                /* 2. AUTHENTICATION FORM: SIGN IN / SIGN UP */
+                <form onSubmit={handleAuth} autoComplete="off" className="space-y-3 font-sans relative z-10">
                   
-                  {/* REGISTRATION-ONLY FIELDS */}
+                  {/* REGISTRATION-ONLY INPUTS */}
                   {isRegistering && (
                     <>
                       {/* Full Name */}
@@ -762,10 +716,10 @@ export default function LoginPage({ onAuthSuccess }) {
                             value={fullName}
                             onChange={(e) => { setFullName(e.target.value); clearMessages(); }}
                             placeholder="e.g. Bikramjit Baruah"
-                            autoComplete="off"
-                            className="w-full bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition-all pl-9"
+                            autoComplete="name"
+                            className="w-full min-h-[44px] bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl px-3.5 py-2.5 text-sm sm:text-xs text-white placeholder-slate-500 outline-none transition-all pl-10"
                           />
-                          <User className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                          <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
                         </div>
                       </div>
 
@@ -786,8 +740,8 @@ export default function LoginPage({ onAuthSuccess }) {
                             value={phone}
                             onChange={(e) => handlePhoneChange(e.target.value)}
                             placeholder="9435012345"
-                            autoComplete="off"
-                            className="w-full bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl pl-13 pr-12 py-2.5 text-xs text-white font-mono placeholder-slate-500 outline-none transition-all"
+                            autoComplete="tel"
+                            className="w-full min-h-[44px] bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl pl-13 pr-12 py-2.5 text-sm sm:text-xs text-white font-mono placeholder-slate-500 outline-none transition-all"
                           />
                           <span className="absolute right-3 text-[10px] font-mono text-slate-500 pointer-events-none">
                             {phone.length}/10
@@ -811,9 +765,9 @@ export default function LoginPage({ onAuthSuccess }) {
                             }}
                             placeholder="e.g. AS-01-AX-9921"
                             autoComplete="off"
-                            className="w-full bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono uppercase placeholder-slate-500 outline-none transition-all pl-9"
+                            className="w-full min-h-[44px] bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl px-3.5 py-2.5 text-sm sm:text-xs text-white font-mono uppercase placeholder-slate-500 outline-none transition-all pl-10"
                           />
-                          <Truck className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                          <Truck className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
                         </div>
                       </div>
                     </>
@@ -830,11 +784,12 @@ export default function LoginPage({ onAuthSuccess }) {
                         required
                         value={email}
                         onChange={(e) => { setEmail(e.target.value); clearMessages(); }}
-                        placeholder="e.g. operator.field@ashtamarg.in"
-                        autoComplete="off"
-                        className="w-full bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition-all pl-9"
+                        placeholder="operator.field@ashtamarg.in"
+                        autoComplete="email"
+                        inputMode="email"
+                        className="w-full min-h-[44px] bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl px-3.5 py-2.5 text-sm sm:text-xs text-white placeholder-slate-500 outline-none transition-all pl-10"
                       />
-                      <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                      <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
                     </div>
                   </div>
 
@@ -849,26 +804,26 @@ export default function LoginPage({ onAuthSuccess }) {
                         required
                         value={password}
                         onChange={(e) => { setPassword(e.target.value); clearMessages(); }}
-                        placeholder="Enter your password"
-                        autoComplete="new-password"
-                        className="w-full bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition-all pl-9 pr-9"
+                        placeholder="Enter your security passcode"
+                        autoComplete={isRegistering ? 'new-password' : 'current-password'}
+                        className="w-full min-h-[44px] bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl px-3.5 py-2.5 text-sm sm:text-xs text-white placeholder-slate-500 outline-none transition-all pl-10 pr-10"
                       />
-                      <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                      <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-3 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                        className="absolute right-3.5 top-3.5 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-0.5"
                       >
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
 
-                  {/* Submit Action CTA Button */}
+                  {/* Action CTA Button */}
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full py-3.5 mt-2 bg-gradient-to-r from-cyan-400 via-sky-500 to-blue-600 hover:from-cyan-300 hover:to-blue-500 disabled:opacity-50 text-slate-950 font-bold font-mono text-xs uppercase tracking-wider rounded-2xl transition-all shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full min-h-[48px] py-3.5 mt-2 bg-gradient-to-r from-cyan-400 via-sky-500 to-blue-600 hover:from-cyan-300 hover:to-blue-500 disabled:opacity-50 text-slate-950 font-bold font-mono text-xs uppercase tracking-wider rounded-2xl transition-all shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {loading ? (
                       <>
@@ -877,12 +832,12 @@ export default function LoginPage({ onAuthSuccess }) {
                       </>
                     ) : isRegistering ? (
                       <>
-                        <span>Register & Send Code</span>
+                        <span>Register & Send Verification Code</span>
                         <ArrowRight className="w-4 h-4 text-slate-950" />
                       </>
                     ) : (
                       <>
-                        <span>Sign In</span>
+                        <span>Sign In to Tactical Dashboard</span>
                         <ArrowRight className="w-4 h-4 text-slate-950" />
                       </>
                     )}
@@ -891,56 +846,87 @@ export default function LoginPage({ onAuthSuccess }) {
                 </form>
               )}
 
-              {/* Toggle Mode (Highlighted Red CTA for Register) */}
-              {!isVerifyingOtp && (
-                <div className="pt-3 text-center flex justify-center border-t border-slate-800/80">
-                  {!isRegistering ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsRegistering(true);
-                        setFormMsg({ type: null, text: '' });
-                      }}
-                      className="text-xs font-mono transition-all cursor-pointer inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-red-500/15 hover:bg-red-500/25 border border-red-500/60 hover:border-red-400 text-red-400 hover:text-red-200 shadow-[0_0_18px_rgba(239,68,68,0.4)] hover:shadow-[0_0_25px_rgba(239,68,68,0.6)] group"
-                    >
-                      <User className="w-3.5 h-3.5 text-red-400 group-hover:scale-110 transition-transform animate-pulse" />
-                      <span>Register as <strong className="text-red-300 font-extrabold underline underline-offset-2 decoration-red-400">Field Operator</strong></span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsRegistering(false);
-                        setFormMsg({ type: null, text: '' });
-                      }}
-                      className="text-xs font-mono transition-all cursor-pointer inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/40 text-slate-300 hover:text-white group"
-                    >
-                      <span>Already have an account?</span>
-                      <strong className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2">Sign In</strong>
-                    </button>
-                  )}
-                </div>
-              )}
-
             </div>
 
           </div>
 
-          {/* ================= RIGHT AMBIENT QUOTE CARD ================= */}
-          <div className="lg:col-span-3 hidden lg:flex flex-col items-start justify-center space-y-4 pl-4 animate-fadeIn">
+          {/* ========================================================================= */}
+          {/* INFORMATION & COVERAGE SHOWCASE (Order 2 on Mobile, Span 6 Desktop)        */}
+          {/* ========================================================================= */}
+          <div className="order-2 lg:order-1 lg:col-span-6 xl:col-span-7 space-y-5 sm:space-y-6 animate-fadeIn">
             
-            {/* Handwritten Title Badge */}
-            <div className="text-xl font-serif italic text-cyan-200/90 tracking-wide">
-              “For A Resilient Northeast”
+            {/* Tagline Badge */}
+            <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-[11px] sm:text-xs font-mono font-bold tracking-wider shadow-inner">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+              <span>SAFER REGIONS. STRONGER TOMORROW.</span>
             </div>
 
-            {/* Glass Quote Card */}
-            <div className="w-full bg-slate-900/60 backdrop-blur-xl border border-white/10 rounded-2xl p-5 shadow-xl space-y-2">
-              <p className="text-xs text-slate-300 italic leading-relaxed">
-                “Prepared people build resilient regions.”
+            {/* Main Headline */}
+            <div className="space-y-2">
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight leading-[1.2]">
+                Ground Intelligence for a{' '}
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-300 to-blue-500">
+                  Safer Northeast
+                </span>
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-sans max-w-xl">
+                Real-time multi-route logging, GPS convoy tracking, and choke point mitigation across all 8 North Eastern States.
               </p>
-              <div className="text-[10px] font-mono font-bold text-cyan-400 tracking-wider">
-                — AshtaMarg
+            </div>
+
+            {/* 4 Feature Badges in 2x2 or 4x1 responsive grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-3 text-center space-y-1 backdrop-blur-md">
+                <div className="w-7 h-7 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mx-auto text-cyan-400">
+                  <Shield className="w-3.5 h-3.5" />
+                </div>
+                <div className="text-[11px] font-bold text-slate-200">Disaster Relief</div>
+              </div>
+
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-3 text-center space-y-1 backdrop-blur-md">
+                <div className="w-7 h-7 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center mx-auto text-blue-400">
+                  <Truck className="w-3.5 h-3.5" />
+                </div>
+                <div className="text-[11px] font-bold text-slate-200">Convoy Tracking</div>
+              </div>
+
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-3 text-center space-y-1 backdrop-blur-md">
+                <div className="w-7 h-7 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
+                  <Users className="w-3.5 h-3.5" />
+                </div>
+                <div className="text-[11px] font-bold text-slate-200">Driver Network</div>
+              </div>
+
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-3 text-center space-y-1 backdrop-blur-md">
+                <div className="w-7 h-7 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center mx-auto text-indigo-400">
+                  <BarChart3 className="w-3.5 h-3.5" />
+                </div>
+                <div className="text-[11px] font-bold text-slate-200">GIS Telemetry</div>
+              </div>
+
+            </div>
+
+            {/* 8 NER States Coverage Block */}
+            <div className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3.5 sm:p-4 backdrop-blur-md space-y-2.5">
+              <div className="flex items-center justify-between text-xs font-mono text-slate-400 pb-2 border-b border-slate-800">
+                <span className="font-bold text-slate-200 uppercase flex items-center space-x-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>8 NER STATES COVERAGE</span>
+                </span>
+                <span className="text-[10px] text-emerald-400 font-bold flex items-center space-x-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>50 STRATEGIC HUBS</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono text-slate-300">
+                {NER_STATES.map((state) => (
+                  <div key={state} className="flex items-center space-x-1.5 text-[11px]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
+                    <span className="truncate">{state}</span>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -949,34 +935,25 @@ export default function LoginPage({ onAuthSuccess }) {
         </div>
       </main>
 
-      {/* 3. BOTTOM SECURITY FOOTER STRIP */}
-      <footer className="relative z-20 w-full px-6 sm:px-10 py-4 border-t border-white/5 backdrop-blur-sm flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px] text-slate-400">
-        
-        {/* Left Security Indicators */}
-        <div className="flex flex-wrap items-center gap-3 text-slate-400">
-          <span className="flex items-center space-x-1 text-slate-300">
-            <Lock className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="font-bold">Secure Access Portal</span>
+      {/* 4. SECURITY & COMPLIANCE FOOTER */}
+      <footer className="relative z-20 w-full px-4 sm:px-8 py-3.5 border-t border-white/5 backdrop-blur-sm flex flex-col sm:flex-row items-center justify-between gap-2.5 font-mono text-[11px] text-slate-400 text-center sm:text-left">
+        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 sm:gap-3 text-slate-400 text-[10px] sm:text-[11px]">
+          <span className="flex items-center space-x-1 text-slate-300 font-bold">
+            <Lock className="w-3 h-3 text-cyan-400" />
+            <span>Secure Access Portal</span>
           </span>
-          <span>|</span>
-          <span>256-bit Encryption</span>
-          <span>|</span>
-          <span>Government Use Only</span>
+          <span>•</span>
+          <span>AES-256 RLS Hardened</span>
+          <span>•</span>
+          <span>8 NER States Transit</span>
         </div>
 
-        {/* Right Policy Links */}
-        <div className="flex items-center space-x-4 text-slate-400">
-          <button type="button" className="hover:text-cyan-300 transition-colors cursor-pointer">Help</button>
-          <span>|</span>
-          <button type="button" className="hover:text-cyan-300 transition-colors cursor-pointer">Privacy</button>
-          <span>|</span>
-          <button type="button" className="hover:text-cyan-300 transition-colors cursor-pointer">Terms</button>
-          <span>|</span>
-          <button type="button" className="hover:text-cyan-300 transition-colors cursor-pointer">Contact</button>
+        <div className="text-[10px] text-slate-500">
+          AshtaMarg Tactical System v2.4.0
         </div>
-
       </footer>
 
     </div>
   );
 }
+
