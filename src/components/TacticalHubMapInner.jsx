@@ -33,6 +33,10 @@ import {
   Search,
   Package,
   ChevronDown,
+  ChevronsRight,
+  Sparkles,
+  CheckCircle2,
+  Compass,
   X,
   Trash2,
   Loader2
@@ -154,30 +158,34 @@ const FALLBACK_50_HUBS = [
 
 const DEFAULT_HAZARDS = [];
 
-// Helper: Crisp Uniform Supply Hub Pin (Navy/Dark Slate Beacon with Warehouse/Building Icon)
+// Helper: Clean Minimalist Supply Hub Pin (Blue GPS Beacon with Warehouse Icon)
 function createSupplyHubDivIcon() {
   return L.divIcon({
     className: 'custom-supply-hub-pin',
     html: `
-      <div class="relative flex items-center justify-center w-6 h-6 rounded-full bg-slate-800 text-cyan-300 border-2 border-white shadow-[0_2px_8px_rgba(0,0,0,0.35)] transition-transform hover:scale-125 cursor-pointer">
-        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M8 10h.01"/><path d="M16 10h.01"/><path d="M8 14h.01"/><path d="M16 14h.01"/></svg>
+      <div class="relative flex items-center justify-center cursor-pointer group select-none">
+        <div class="relative flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-tr from-blue-700 via-blue-600 to-cyan-500 text-white border-2 border-white shadow-[0_2px_8px_rgba(29,78,216,0.6)] group-hover:scale-125 transition-transform duration-150">
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M8 10h.01"/><path d="M16 10h.01"/><path d="M8 14h.01"/><path d="M16 14h.01"/></svg>
+        </div>
       </div>
     `,
     iconSize: [24, 24],
     iconAnchor: [12, 12],
-    popupAnchor: [0, -12],
+    popupAnchor: [0, -14],
   });
 }
 
 // Helper: Selected Origin Supply Hub Marker (Pulsing Emerald Ring & Dynamic HUD Badge)
-function createOriginHubDivIcon() {
+function createOriginHubDivIcon(hub = {}) {
+  const shortName = hub.district || hub.hub_name || 'Origin';
+  const code = hub.hub_code || '';
+
   return L.divIcon({
     className: 'custom-origin-hub-pin',
     html: `
       <div class="relative flex flex-col items-center justify-center cursor-pointer select-none">
-        <div class="absolute -top-7 bg-slate-950/95 text-emerald-300 font-mono text-[8px] font-black px-2 py-0.5 rounded-md border border-emerald-400 shadow-[0_2px_12px_rgba(16,185,129,0.6)] whitespace-nowrap z-30 flex items-center gap-1 tracking-wider uppercase">
-          <span>📍</span>
-          <span>ORIGIN HUB</span>
+        <div class="absolute -top-7 bg-emerald-600 text-white font-mono text-[8px] font-black px-2 py-0.5 rounded-md border border-emerald-300 shadow-[0_2px_12px_rgba(16,185,129,0.7)] whitespace-nowrap z-30 flex items-center gap-1 tracking-wider uppercase">
+          <span>📍 ORIGIN</span>
         </div>
         <div class="relative flex items-center justify-center w-8 h-8">
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -186,23 +194,30 @@ function createOriginHubDivIcon() {
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M8 10h.01"/><path d="M16 10h.01"/><path d="M8 14h.01"/><path d="M16 14h.01"/></svg>
           </div>
         </div>
+        <div class="w-1.5 h-1.5 bg-emerald-600 rotate-45 -mt-1 border-r border-b border-white z-20"></div>
+        <div class="mt-0.5 px-2 py-0.5 rounded-md bg-emerald-950 text-emerald-300 font-sans text-[9px] font-black border border-emerald-500 shadow-sm whitespace-nowrap leading-tight text-center">
+          <span>${shortName}</span>
+          ${code ? `<span class="text-emerald-400 text-[8px] font-mono block">${code}</span>` : ''}
+        </div>
       </div>
     `,
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
-    popupAnchor: [0, -20],
+    iconSize: [70, 56],
+    iconAnchor: [35, 18],
+    popupAnchor: [0, -22],
   });
 }
 
 // Helper: Selected Destination Supply Hub Marker (Pulsing Cyan Target Ring & Dynamic HUD Badge)
-function createDestinationHubDivIcon() {
+function createDestinationHubDivIcon(hub = {}) {
+  const shortName = hub.district || hub.hub_name || 'Dest';
+  const code = hub.hub_code || '';
+
   return L.divIcon({
     className: 'custom-destination-hub-pin',
     html: `
       <div class="relative flex flex-col items-center justify-center cursor-pointer select-none">
-        <div class="absolute -top-7 bg-slate-950/95 text-cyan-300 font-mono text-[8px] font-black px-2 py-0.5 rounded-md border border-cyan-400 shadow-[0_2px_12px_rgba(6,182,212,0.6)] whitespace-nowrap z-30 flex items-center gap-1 tracking-wider uppercase">
-          <span>🎯</span>
-          <span>DESTINATION HUB</span>
+        <div class="absolute -top-7 bg-cyan-600 text-white font-mono text-[8px] font-black px-2 py-0.5 rounded-md border border-cyan-300 shadow-[0_2px_12px_rgba(6,182,212,0.7)] whitespace-nowrap z-30 flex items-center gap-1 tracking-wider uppercase">
+          <span>🎯 DESTINATION</span>
         </div>
         <div class="relative flex items-center justify-center w-8 h-8">
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
@@ -211,11 +226,16 @@ function createDestinationHubDivIcon() {
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M8 10h.01"/><path d="M16 10h.01"/><path d="M8 14h.01"/><path d="M16 14h.01"/></svg>
           </div>
         </div>
+        <div class="w-1.5 h-1.5 bg-cyan-600 rotate-45 -mt-1 border-r border-b border-white z-20"></div>
+        <div class="mt-0.5 px-2 py-0.5 rounded-md bg-cyan-950 text-cyan-300 font-sans text-[9px] font-black border border-cyan-500 shadow-sm whitespace-nowrap leading-tight text-center">
+          <span>${shortName}</span>
+          ${code ? `<span class="text-cyan-400 text-[8px] font-mono block">${code}</span>` : ''}
+        </div>
       </div>
     `,
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
-    popupAnchor: [0, -20],
+    iconSize: [70, 56],
+    iconAnchor: [35, 18],
+    popupAnchor: [0, -22],
   });
 }
 
@@ -567,7 +587,7 @@ export default function TacticalHubMapInner({
 
         if (isNodalOfficer) {
           driversMap.forEach((d, id) => {
-            if (!seenDriverIds.has(id) && d.current_latitude && d.current_longitude) {
+            if (!seenDriverIds.has(id) && d.current_latitude && d.current_longitude && d.is_active_duty) {
               combined.push({
                 id: id,
                 driver_id: id,
@@ -591,20 +611,11 @@ export default function TacticalHubMapInner({
           });
         }
 
-        // Local active journey fallback for instant driver responsiveness
-        if (combined.length === 0 && typeof window !== 'undefined') {
-          try {
-            const cached = localStorage.getItem('ner_active_journey');
-            if (cached) {
-              const parsed = JSON.parse(cached);
-              if (parsed && (parsed.current_lat || parsed.current_latitude)) {
-                combined.push(parsed);
-              }
-            }
-          } catch (e) {}
-        }
-
         setActiveDrivers(combined);
+        if (combined.length === 0) {
+          setSelectedRadarDriver(null);
+          setShowDriverDropdown(false);
+        }
       } catch (err) {
         console.warn('Fleet telemetry fetch fallback:', err);
       }
@@ -624,14 +635,22 @@ export default function TacticalHubMapInner({
       .subscribe();
 
     const handleJourneyUpdate = () => fetchFleetTelemetry();
+    const handleJourneyHalted = () => {
+      setActiveDrivers([]);
+      setSelectedRadarDriver(null);
+      setShowDriverDropdown(false);
+      fetchFleetTelemetry();
+    };
 
     if (typeof window !== 'undefined') {
       window.addEventListener('ner_journey_started', handleJourneyUpdate);
-      window.addEventListener('ner_journey_deleted', handleJourneyUpdate);
+      window.addEventListener('ner_journey_completed', handleJourneyHalted);
+      window.addEventListener('ner_journey_deleted', handleJourneyHalted);
       return () => {
         supabase.removeChannel(channel);
         window.removeEventListener('ner_journey_started', handleJourneyUpdate);
-        window.removeEventListener('ner_journey_deleted', handleJourneyUpdate);
+        window.removeEventListener('ner_journey_completed', handleJourneyHalted);
+        window.removeEventListener('ner_journey_deleted', handleJourneyHalted);
       };
     }
   }, [isNodalOfficer, user?.id]);
@@ -743,9 +762,9 @@ export default function TacticalHubMapInner({
           const isDest = destHub && (destHub.hub_code === hub.hub_code || destHub.id === hub.id);
 
           const icon = isOrigin
-            ? createOriginHubDivIcon()
+            ? createOriginHubDivIcon(hub)
             : isDest
-            ? createDestinationHubDivIcon()
+            ? createDestinationHubDivIcon(hub)
             : createSupplyHubDivIcon();
 
           return (
@@ -755,73 +774,106 @@ export default function TacticalHubMapInner({
               icon={icon}
               zIndexOffset={isOrigin || isDest ? 1000 : 100}
             >
-              <Tooltip direction="top" offset={isOrigin || isDest ? [0, -20] : [0, -12]}>
-                <span className={`font-mono font-bold text-[10px] ${
-                  isOrigin ? 'text-emerald-600 dark:text-emerald-400' : isDest ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-800 dark:text-slate-200'
-                }`}>
-                  {isOrigin ? '📍 ORIGIN HUB: ' : isDest ? '🎯 DESTINATION HUB: ' : '🏢 '}
-                  {hub.hub_name} ({hub.hub_code})
-                </span>
+              <Tooltip direction="top" offset={isOrigin || isDest ? [0, -22] : [0, -14]} className="custom-tactical-tooltip">
+                <div className="flex items-center gap-1.5 px-1 py-0.5 font-sans font-bold text-xs text-white">
+                  <span>{isOrigin ? '📍 ORIGIN:' : isDest ? '🎯 DESTINATION:' : '🏢'}</span>
+                  <span className="text-white font-bold tracking-wide">{hub.hub_name}</span>
+                  <span className="text-cyan-300 font-mono text-[10px]">({hub.hub_code})</span>
+                </div>
               </Tooltip>
 
-              <Popup>
-                <div className="p-3 bg-slate-950/95 backdrop-blur-md text-slate-100 font-mono text-xs max-w-xs space-y-2 rounded-xl border border-slate-800 shadow-2xl">
-                  <div className="flex items-center justify-between pb-1.5 border-b border-slate-800">
-                    <span className="font-bold text-cyan-400 text-[10px] tracking-wider">{hub.hub_code}</span>
-                    <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-blue-900/60 text-blue-300 border border-blue-700">
-                      SUPPLY HUB
+              <Popup className="custom-hub-popup" minWidth={290} maxWidth={320}>
+                <div className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans text-xs rounded-2xl overflow-hidden shadow-2xl border border-slate-200/90 dark:border-slate-800">
+                  {/* Dark Navy / Slate Top Header Bar */}
+                  <div className="bg-[#0f172a] px-3.5 py-2.5 flex items-center justify-between text-white border-b border-slate-800">
+                    <span className="font-bold text-xs tracking-wider font-mono text-white">
+                      {hub.hub_code || 'HUB-001'}
                     </span>
-                  </div>
-
-                  <div>
-                    <h4 className="font-bold text-white text-xs">{hub.hub_name}</h4>
-                    <p className="text-slate-400 text-[11px] flex items-center space-x-1 mt-0.5">
-                      <MapPin className="w-3 h-3 text-slate-500 shrink-0" />
-                      <span>{hub.district}, {hub.state}</span>
-                    </p>
-                  </div>
-
-                  <div className="bg-slate-900 p-2 rounded-lg border border-slate-800 text-[11px] space-y-1">
-                    <div className="flex justify-between text-slate-300">
-                      <span className="text-slate-500">Facility Type:</span>
-                      <strong className="text-cyan-300">{hub.hub_type || 'Regional Warehouse'}</strong>
-                    </div>
-                    <div className="flex justify-between text-slate-300">
-                      <span className="text-slate-500">Total Capacity:</span>
-                      <strong className="text-white">{hub.capacity_mt ? `${hub.capacity_mt} MT` : '1,000 MT'}</strong>
+                    <div className="flex items-center gap-1.5 pr-3">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
+                      <span className="text-emerald-400 font-medium text-[11px]">
+                        Operational
+                      </span>
                     </div>
                   </div>
 
-                  {/* Route Selection Actions */}
-                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
-                    {onSelectOrigin && (
-                      <button
-                        type="button"
-                        onClick={() => onSelectOrigin(hub.hub_code || hub.id)}
-                        className={`px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center justify-center space-x-1 cursor-pointer ${
-                          isOrigin 
-                            ? 'bg-blue-600 text-white shadow-sm' 
-                            : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-700'
-                        }`}
-                      >
-                        <MapPin className="w-3 h-3 text-blue-400" />
-                        <span>{isOrigin ? 'ORIGIN SET' : 'SET AS ORIGIN'}</span>
-                      </button>
-                    )}
-                    {onSelectDest && (
-                      <button
-                        type="button"
-                        onClick={() => onSelectDest(hub.hub_code || hub.id)}
-                        className={`px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center justify-center space-x-1 cursor-pointer ${
-                          isDest 
-                            ? 'bg-cyan-600 text-white shadow-sm' 
-                            : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-700'
-                        }`}
-                      >
-                        <Navigation className="w-3 h-3 text-cyan-400" />
-                        <span>{isDest ? 'DEST SET' : 'SET AS DEST'}</span>
-                      </button>
-                    )}
+                  {/* Body Content */}
+                  <div className="p-3.5 space-y-3">
+                    {/* Title & District, State */}
+                    <div>
+                      <h4 className="font-bold text-[13px] text-slate-900 dark:text-white leading-tight">
+                        {hub.hub_name || 'Guwahati Logistics Hub'}
+                      </h4>
+                      <p className="text-slate-500 dark:text-slate-400 text-[11px] flex items-center gap-1 mt-0.5 font-medium">
+                        <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span>{hub.district || hub.hub_name}, {hub.state}</span>
+                      </p>
+                    </div>
+
+                    {/* 2-Column Info Stats Grid */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* Facility Type */}
+                      <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl p-2 flex items-center gap-2">
+                        <div className="p-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60 shrink-0">
+                          <Building2 className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="block text-[8.5px] uppercase tracking-wider text-slate-400 dark:text-slate-400 font-bold leading-tight">
+                            Facility Type
+                          </span>
+                          <strong className="block text-[10.5px] font-bold text-slate-800 dark:text-slate-100 truncate leading-tight mt-0.5">
+                            {hub.hub_type || 'State Central Depot'}
+                          </strong>
+                        </div>
+                      </div>
+
+                      {/* Total Capacity */}
+                      <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl p-2 flex items-center gap-2">
+                        <div className="p-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60 shrink-0">
+                          <Boxes className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="block text-[8.5px] uppercase tracking-wider text-slate-400 dark:text-slate-400 font-bold leading-tight">
+                            Total Capacity
+                          </span>
+                          <strong className="block text-[10.5px] font-bold text-slate-800 dark:text-slate-100 truncate leading-tight mt-0.5">
+                            {hub.capacity_mt ? `${hub.capacity_mt} MT` : hub.capacity_metric_tons ? `${parseFloat(hub.capacity_metric_tons).toLocaleString()} MT` : '2,500 MT'}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons: Set as Origin & Set as Destination */}
+                    <div className="grid grid-cols-2 gap-2 pt-0.5">
+                      {onSelectOrigin && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectOrigin(hub)}
+                          className={`py-2 px-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs ${
+                            isOrigin
+                              ? 'bg-blue-600 text-white border border-blue-600 shadow-xs'
+                              : 'bg-blue-50/70 hover:bg-blue-100/90 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 text-blue-600 dark:text-cyan-400 border border-blue-200/90 dark:border-blue-800/60'
+                          }`}
+                        >
+                          <Navigation className="w-3.5 h-3.5 shrink-0 -rotate-45" />
+                          <span>{isOrigin ? 'Origin Set' : 'Set as Origin'}</span>
+                        </button>
+                      )}
+                      {onSelectDest && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectDest(hub)}
+                          className={`py-2 px-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs ${
+                            isDest
+                              ? 'bg-blue-600 text-white border border-blue-600 shadow-xs'
+                              : 'bg-blue-50/70 hover:bg-blue-100/90 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 text-blue-600 dark:text-cyan-400 border border-blue-200/90 dark:border-blue-800/60'
+                          }`}
+                        >
+                          <ChevronsRight className="w-3.5 h-3.5 shrink-0" />
+                          <span>{isDest ? 'Dest Set' : 'Set as Destination'}</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </Popup>
@@ -838,6 +890,15 @@ export default function TacticalHubMapInner({
           const impactRadiusKm = parseFloat(haz.impact_radius_km) || 5.0;
           const radiusMeters = impactRadiusKm * 1000;
 
+          const geo = estimateNerLocationFallback(hLat, hLon);
+          const st = (haz.state && haz.state !== 'null' && haz.state !== 'NER' && !(haz.state === 'Assam' && haz.district === 'Unspecified Sector'))
+            ? haz.state
+            : geo.state;
+          const dt = (haz.district && haz.district !== 'Unspecified Sector' && haz.district !== 'null' && haz.district !== '')
+            ? haz.district
+            : geo.district;
+          const locationString = `${dt}, ${st}`;
+
           return (
             <React.Fragment key={`hazard-group-${haz.id}`}>
               {/* Dynamic Danger Zone Circle Perimeter */}
@@ -852,10 +913,11 @@ export default function TacticalHubMapInner({
                   dashArray: '5, 5',
                 }}
               >
-                <Tooltip sticky>
-                  <span className="font-mono text-[10px] text-red-600 dark:text-red-400 font-bold">
-                    ⚠️ {haz.hazard_type || 'Threat'} Danger Perimeter ({impactRadiusKm} km)
-                  </span>
+                <Tooltip sticky className="custom-tactical-tooltip">
+                  <div className="flex items-center gap-1.5 px-1 py-0.5 font-sans font-bold text-xs text-white">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    <span>{haz.hazard_type ? haz.hazard_type.replace(/_/g, ' ') : 'Danger Perimeter'} ({impactRadiusKm} km)</span>
+                  </div>
                 </Tooltip>
               </Circle>
 
@@ -865,118 +927,172 @@ export default function TacticalHubMapInner({
                 icon={createRoadHazardDivIcon()}
                 zIndexOffset={500}
               >
-                <Tooltip direction="top" offset={[0, -14]}>
-                  <span className="font-mono font-bold text-[10px] text-red-700">
-                    ⚠️ {haz.hazard_type || haz.title || 'Road Hazard'} ({haz.severity?.toUpperCase() || 'HIGH'} • {impactRadiusKm} km)
-                  </span>
+                <Tooltip direction="top" offset={[0, -14]} className="custom-tactical-tooltip">
+                  <div className="flex items-center gap-1.5 px-1.5 py-0.5 font-sans font-bold text-xs text-white">
+                    <span className="text-rose-400">⚠️</span>
+                    <span>{haz.title || (haz.hazard_type ? haz.hazard_type.replace(/_/g, ' ') : 'Road Hazard')}</span>
+                    <span className="text-rose-300 font-mono text-[10px]">({haz.severity?.toUpperCase() || 'CRITICAL'} • {impactRadiusKm} km)</span>
+                  </div>
                 </Tooltip>
 
-              <Popup>
-                <div className="p-3 bg-slate-950/95 backdrop-blur-md text-slate-100 font-mono text-xs max-w-xs space-y-2 rounded-xl border border-rose-900/80 shadow-2xl">
-                  <div className="flex items-center justify-between pb-1 border-b border-rose-950">
-                    <span className="font-bold text-rose-400 text-[10px] uppercase tracking-wider flex items-center space-x-1">
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      <span>{haz.hazard_type || 'ROAD HAZARD'}</span>
-                    </span>
-                    <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${
-                      haz.is_verified || haz.reported_by_role === 'nodal_officer'
-                        ? 'bg-amber-950 text-amber-300 border-amber-700'
-                        : 'bg-rose-950 text-rose-300 border-rose-800'
-                    }`}>
-                      {haz.is_verified || haz.reported_by_role === 'nodal_officer' ? '🏛️ NODAL VERIFIED' : `${haz.severity} SEVERITY`}
-                    </span>
-                  </div>
-
-                  {/* Evidence Media Preview (Photos & Videos) */}
-                  {(haz.image_url || (haz.media_urls && haz.media_urls.length > 0)) && (
-                    <div className="relative rounded-xl overflow-hidden border border-rose-900/80 bg-slate-900 max-h-36">
-                      {haz.image_url?.match(/\.(mp4|webm|mov|ogg|m4v)(\?.*)?$/i) || haz.media_urls?.[0]?.match(/\.(mp4|webm|mov|ogg|m4v)(\?.*)?$/i) ? (
-                        <video 
-                          src={haz.image_url || haz.media_urls?.[0]} 
-                          controls 
-                          playsInline 
-                          className="w-full max-h-36 object-cover bg-black" 
-                        />
-                      ) : (
-                        <img 
-                          src={haz.image_url || haz.media_urls?.[0]} 
-                          alt="Hazard evidence" 
-                          className="w-full max-h-36 object-cover" 
-                        />
-                      )}
-                      {haz.media_urls && haz.media_urls.length > 1 && (
-                        <span className="absolute bottom-1 right-1 bg-black/85 text-cyan-300 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded border border-cyan-800">
-                          +{haz.media_urls.length - 1} more
+                <Popup className="custom-tactical-popup" minWidth={300} maxWidth={330}>
+                  <div className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans text-xs rounded-2xl overflow-hidden shadow-2xl border border-slate-200/90 dark:border-slate-800">
+                    {/* Top Header */}
+                    <div className="bg-[#0f172a] px-3.5 py-2.5 flex items-center justify-between text-white border-b border-slate-800">
+                      <div className="flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        <span className="font-bold text-xs tracking-wider font-mono uppercase text-white">
+                          {haz.hazard_type ? haz.hazard_type.replace(/_/g, ' ') : 'ROAD HAZARD'}
                         </span>
-                      )}
+                      </div>
+                      <div className="flex items-center gap-1.5 pr-3">
+                        <span className={`w-2 h-2 rounded-full ${
+                          haz.ai_verified || haz.is_verified || haz.reported_by_role === 'nodal_officer'
+                            ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]'
+                            : 'bg-rose-500 animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.9)]'
+                        }`} />
+                        <span className={`text-[11px] font-medium font-mono ${
+                          haz.ai_verified || haz.is_verified || haz.reported_by_role === 'nodal_officer'
+                            ? 'text-emerald-400'
+                            : 'text-rose-400 uppercase'
+                        }`}>
+                          {haz.ai_verified || haz.is_verified || haz.reported_by_role === 'nodal_officer' ? 'AI Verified' : (haz.severity ? `${haz.severity} SEVERITY` : 'CRITICAL')}
+                        </span>
+                      </div>
                     </div>
-                  )}
 
-                  <div>
-                    <h5 className="font-bold text-white text-xs leading-snug">{haz.title}</h5>
-                    <div className="text-[10px] text-slate-400 flex items-center space-x-1 mt-0.5">
-                      <MapPin className="w-3 h-3 text-slate-500" />
-                      <span>
-                        {(() => {
-                          const geo = estimateNerLocationFallback(parseFloat(haz.latitude), parseFloat(haz.longitude));
-                          const st = (haz.state && haz.state !== 'null' && haz.state !== 'NER' && !(haz.state === 'Assam' && haz.district === 'Unspecified Sector'))
-                            ? haz.state
-                            : geo.state;
-                          const dt = (haz.district && haz.district !== 'Unspecified Sector' && haz.district !== 'null' && haz.district !== '')
-                            ? haz.district
-                            : geo.district;
-                          return `${dt}, ${st}`;
-                        })()}
-                      </span>
+                    {/* Body Content */}
+                    <div className="p-3.5 space-y-3">
+                      {/* Evidence Media Preview (Photos & Videos) */}
+                      {(haz.image_url || (haz.media_urls && haz.media_urls.length > 0)) && (
+                        <div className="relative rounded-xl overflow-hidden border border-slate-200/90 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 shadow-2xs">
+                          {haz.image_url?.match(/\.(mp4|webm|mov|ogg|m4v)(\?.*)?$/i) || haz.media_urls?.[0]?.match(/\.(mp4|webm|mov|ogg|m4v)(\?.*)?$/i) ? (
+                            <video 
+                              src={haz.image_url || haz.media_urls?.[0]} 
+                              controls 
+                              playsInline 
+                              className="w-full max-h-36 object-cover bg-black" 
+                            />
+                          ) : (
+                            <img 
+                              src={haz.image_url || haz.media_urls?.[0]} 
+                              alt="Hazard evidence" 
+                              className="w-full max-h-36 object-cover" 
+                            />
+                          )}
+                          <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-black/75 backdrop-blur-xs text-white text-[9px] font-mono font-bold border border-white/20">
+                            📸 Live Field Evidence
+                          </div>
+                          {haz.media_urls && haz.media_urls.length > 1 && (
+                            <span className="absolute bottom-2 right-2 bg-black/85 text-cyan-300 font-mono text-[9px] font-bold px-1.5 py-0.5 rounded border border-cyan-800">
+                              +{haz.media_urls.length - 1} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Title & Location */}
+                      <div>
+                        <h4 className="font-bold text-[13px] text-slate-900 dark:text-white leading-tight">
+                          {haz.title || 'Road Obstruction Alert'}
+                        </h4>
+                        <p className="text-slate-500 dark:text-slate-400 text-[11px] flex items-center gap-1 mt-0.5 font-medium">
+                          <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                          <span>{locationString}</span>
+                        </p>
+                      </div>
+
+                      {/* 2-Column Info Stats Grid */}
+                      <div className="grid grid-cols-2 gap-2">
+                        {/* Severity Level */}
+                        <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl p-2 flex items-center gap-2">
+                          <div className="p-1.5 rounded-lg bg-white dark:bg-slate-800 text-rose-500 border border-slate-200/60 dark:border-slate-700/60 shrink-0">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="block text-[8.5px] uppercase tracking-wider text-slate-400 dark:text-slate-400 font-bold leading-tight">
+                              Severity Level
+                            </span>
+                            <strong className="block text-[10.5px] font-bold text-rose-600 dark:text-rose-400 truncate leading-tight mt-0.5 uppercase">
+                              {haz.severity || 'Critical'}
+                            </strong>
+                          </div>
+                        </div>
+
+                        {/* Danger Radius */}
+                        <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl p-2 flex items-center gap-2">
+                          <div className="p-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60 shrink-0">
+                            <ShieldAlert className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="block text-[8.5px] uppercase tracking-wider text-slate-400 dark:text-slate-400 font-bold leading-tight">
+                              Danger Radius
+                            </span>
+                            <strong className="block text-[10.5px] font-bold text-slate-800 dark:text-slate-100 truncate leading-tight mt-0.5">
+                              {impactRadiusKm} km Perimeter
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* AI Threat Assessment Callout (if available) */}
+                      {(haz.ai_verdict_summary || haz.ai_verified) && (
+                        <div className="bg-blue-50/70 dark:bg-slate-800/60 border border-blue-100 dark:border-slate-700 rounded-xl p-2.5 text-[10.5px] space-y-1">
+                          <div className="flex items-center justify-between text-blue-700 dark:text-cyan-400 font-bold text-[10px]">
+                            <span className="flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-blue-600 dark:text-cyan-400" />
+                              <span>AI Threat Assessment</span>
+                            </span>
+                            {haz.ai_confidence && (
+                              <span className="font-mono font-extrabold text-emerald-600 dark:text-emerald-400">
+                                {Math.round(haz.ai_confidence * 100)}% Match
+                              </span>
+                            )}
+                          </div>
+                          {haz.ai_verdict_summary && (
+                            <p className="text-slate-700 dark:text-slate-300 leading-relaxed italic">
+                              {haz.ai_verdict_summary}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Reporter Notes (if present and distinct) */}
+                      {haz.notes && haz.notes !== haz.ai_verdict_summary && (
+                        <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/50 rounded-xl p-2 text-[10.5px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                          <span className="font-bold text-slate-700 dark:text-slate-200 block text-[9.5px] mb-0.5">Field Dispatch Notes:</span>
+                          {haz.notes}
+                        </div>
+                      )}
+
+                      {/* Reporter Info */}
+                      {haz.reported_by_name && (
+                        <div className="text-[9.5px] text-slate-400 flex items-center justify-between px-0.5">
+                          <span>Reported by: <strong className="text-slate-700 dark:text-slate-200">{haz.reported_by_name}</strong></span>
+                        </div>
+                      )}
+
+                      {/* Delete / Clear Action */}
+                      {(effectiveIsNodal || (user?.id && (haz.reported_by_id === user.id || haz.reported_by === user.id))) && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteHazardFromMap(haz, e)}
+                          disabled={deletingHazardId === haz.id}
+                          className="w-full py-2 px-3 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 shadow-2xs disabled:opacity-50"
+                        >
+                          {deletingHazardId === haz.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-500" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                          )}
+                          <span>{effectiveIsNodal ? 'Authority Override: Delete Hazard' : 'Clear / Delete My Hazard'}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
-
-                  {haz.reported_by_name && (
-                    <div className="text-[9px] text-slate-400 bg-slate-900 p-1.5 rounded border border-slate-800 flex items-center justify-between">
-                      <span>Reported by: <strong className="text-slate-200">{haz.reported_by_name}</strong></span>
-                    </div>
-                  )}
-
-                  {haz.notes && (
-                    <p className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-[10px] text-rose-200/90 leading-relaxed">
-                      {haz.notes}
-                    </p>
-                  )}
-
-                  {/* Scoped Hazard Deletion Action */}
-                  {effectiveIsNodal ? (
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteHazardFromMap(haz, e)}
-                      disabled={deletingHazardId === haz.id}
-                      className="w-full mt-2 px-2 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-200 text-[10px] font-bold rounded-lg flex items-center justify-center space-x-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {deletingHazardId === haz.id ? (
-                        <Loader2 className="w-3 h-3 animate-spin text-red-400" />
-                      ) : (
-                        <ShieldAlert className="w-3 h-3 text-red-400" />
-                      )}
-                      <span>🛡️ Authority Override: Delete</span>
-                    </button>
-                  ) : user?.id && (haz.reported_by_id === user.id || haz.reported_by === user.id) ? (
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteHazardFromMap(haz, e)}
-                      disabled={deletingHazardId === haz.id}
-                      className="w-full mt-2 px-2 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-200 text-[10px] font-bold rounded-lg flex items-center justify-center space-x-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {deletingHazardId === haz.id ? (
-                        <Loader2 className="w-3 h-3 animate-spin text-red-400" />
-                      ) : (
-                        <Trash2 className="w-3 h-3 text-red-400" />
-                      )}
-                      <span>🗑️ Clear / Delete My Hazard</span>
-                    </button>
-                  ) : null}
-                </div>
-              </Popup>
-            </Marker>
-          </React.Fragment>
+                </Popup>
+              </Marker>
+            </React.Fragment>
           );
         })}
 
@@ -1191,16 +1307,16 @@ export default function TacticalHubMapInner({
         </div>
       )}
 
-      {/* Tactical Maximize / Minimize Symbol Button */}
+      {/* Tactical Maximize / Minimize Symbol Button (Positioned cleanly under zoom controls on left) */}
       <button
         type="button"
         onClick={() => setIsFullscreen(!isFullscreen)}
-        title={isFullscreen ? 'Minimize' : 'Maximize'}
-        aria-label={isFullscreen ? 'Minimize' : 'Maximize'}
-        className="absolute top-3 right-3 z-[400] w-8 h-8 flex items-center justify-center bg-white/95 dark:bg-slate-950/95 hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-800 hover:border-cyan-500 rounded-xl shadow-md backdrop-blur-md transition-all cursor-pointer group"
+        title={isFullscreen ? 'Exit Fullscreen' : 'Maximize Map'}
+        aria-label={isFullscreen ? 'Exit Fullscreen' : 'Maximize Map'}
+        className="absolute top-[78px] left-2.5 z-[400] w-[34px] h-[34px] flex items-center justify-center bg-white/95 dark:bg-slate-950/95 hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-800 hover:border-cyan-500 rounded-lg shadow-md backdrop-blur-md transition-all cursor-pointer group"
       >
         {isFullscreen ? (
-          <Minimize2 className="w-4 h-4 text-slate-700 dark:text-rose-400 group-hover:scale-110 transition-transform" />
+          <Minimize2 className="w-4 h-4 text-rose-600 dark:text-rose-400 group-hover:scale-110 transition-transform" />
         ) : (
           <Maximize2 className="w-4 h-4 text-slate-700 dark:text-cyan-400 group-hover:scale-110 transition-transform" />
         )}

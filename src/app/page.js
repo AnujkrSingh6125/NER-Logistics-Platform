@@ -14,6 +14,7 @@ import ShipmentsView from '@/components/views/ShipmentsView';
 import SettingsView from '@/components/views/SettingsView';
 import LiveClockWidget from '@/components/LiveClockWidget';
 import RouteNavigator from '@/components/RouteNavigator';
+import TacticalAiChatWidget from '@/components/TacticalAiChatWidget';
 import { 
   Building2, 
   AlertTriangle, 
@@ -677,6 +678,31 @@ export default function Home() {
 
   const activeRoute = multiRouteData?.allRoutes?.[activeRouteIndex] || multiRouteData?.primaryRoute;
 
+  // AI Chat interactive map focus callbacks
+  const handleChatSelectHazard = useCallback((hazardIdentifier) => {
+    setCurrentView('command');
+    const match = hazards.find(h => 
+      h.id === hazardIdentifier || 
+      (h.title && h.title.toLowerCase().includes(String(hazardIdentifier).toLowerCase())) ||
+      (h.hazard_type && h.hazard_type.toLowerCase().includes(String(hazardIdentifier).toLowerCase()))
+    );
+    if (match && match.latitude && match.longitude) {
+      focusOnMap([parseFloat(match.latitude), parseFloat(match.longitude)], 15, match);
+    }
+  }, [hazards, focusOnMap, setCurrentView]);
+
+  const handleChatSelectHub = useCallback((hubIdentifier) => {
+    setCurrentView('command');
+    const match = hubs.find(h => 
+      h.hub_code === hubIdentifier || 
+      h.id === hubIdentifier || 
+      (h.hub_name && h.hub_name.toLowerCase().includes(String(hubIdentifier).toLowerCase()))
+    );
+    if (match && match.latitude && match.longitude) {
+      focusOnMap([parseFloat(match.latitude), parseFloat(match.longitude)], 14, match);
+    }
+  }, [hubs, focusOnMap, setCurrentView]);
+
   return (
     <div className="min-h-screen bg-slate-100/90 dark:bg-slate-950 text-slate-800 dark:text-slate-100 py-4 px-3 sm:px-5 lg:px-6 space-y-5 font-sans flex flex-col">
       
@@ -995,6 +1021,72 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* SAFE CORRIDOR INDEX (SCI) THREAT SCORE GAUGE */}
+                <div className="space-y-1.5 pt-0.5">
+                  <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1">
+                      <span>SAFE CORRIDOR INDEX (SCI)</span>
+                    </span>
+                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-black ${
+                      (activeRoute.sciScore ?? 10) < 25 
+                        ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30' 
+                        : (activeRoute.sciScore ?? 10) < 50 
+                          ? 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30' 
+                          : 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/30'
+                    }`}>
+                      {activeRoute.sciScore ?? 10} / 100 • {(activeRoute.sciScore ?? 10) < 25 ? 'OPTIMAL' : (activeRoute.sciScore ?? 10) < 50 ? 'CAUTION' : 'HIGH RISK'}
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden p-0.5 border border-slate-300 dark:border-slate-700">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        (activeRoute.sciScore ?? 10) < 25 
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400' 
+                          : (activeRoute.sciScore ?? 10) < 50 
+                            ? 'bg-gradient-to-r from-amber-500 to-yellow-400' 
+                            : 'bg-gradient-to-r from-rose-500 to-red-600'
+                      }`}
+                      style={{ width: `${Math.max(8, Math.min(100, activeRoute.sciScore ?? 10))}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* LIVE WEATHER & MONSOON THREAT HUD */}
+                {activeRoute.weather && (
+                  <div className={`p-3 rounded-2xl border text-[11px] space-y-1.5 ${
+                    activeRoute.weather.riskTier === 'critical_monsoon'
+                      ? 'bg-rose-50/80 dark:bg-rose-950/40 border-rose-400 dark:border-rose-800 text-rose-950 dark:text-rose-200'
+                      : activeRoute.weather.riskTier === 'caution'
+                        ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-400 dark:border-amber-800 text-amber-950 dark:text-amber-200'
+                        : 'bg-blue-50/80 dark:bg-slate-800/80 border-blue-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                  }`}>
+                    <div className="flex items-center justify-between font-bold uppercase text-[10px]">
+                      <span className="flex items-center space-x-1.5">
+                        <span className="text-sm">{activeRoute.weather.weatherEmoji || '🌤️'}</span>
+                        <span>LIVE CORRIDOR WEATHER</span>
+                      </span>
+                      <span className="font-mono text-xs font-black">
+                        {activeRoute.weather.avgTemperature}°C
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] font-sans">
+                      <span className="font-bold text-slate-700 dark:text-slate-200">
+                        {activeRoute.weather.dominantWeather || 'Variable Mountain Weather'}
+                      </span>
+                      <span className="font-mono font-bold text-blue-600 dark:text-cyan-400">
+                        {activeRoute.weather.maxRainfallMm > 0 ? `🌧️ ${activeRoute.weather.maxRainfallMm} mm/h` : '☀️ 0 mm/h Rain'}
+                      </span>
+                    </div>
+
+                    {activeRoute.weather.alertMessage && (
+                      <p className="text-[9.5px] leading-tight opacity-90 italic pt-0.5 border-t border-slate-200/60 dark:border-slate-700/60">
+                        {activeRoute.weather.alertMessage}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* CORRIDOR SAFETY CHECK (Adaptive HUD Box) */}
                 <div className={`border rounded-2xl p-3 text-[11px] space-y-1.5 ${
                   (activeRoute.flaggedHazards?.length || 0) === 0
@@ -1125,6 +1217,16 @@ export default function Home() {
           profile={profile}
         />
       )}
+
+      {/* Floating Tactical AI Copilot Launcher at Bottom-Right Corner */}
+      <TacticalAiChatWidget 
+        hazards={hazards}
+        hubs={hubs}
+        activeRoute={activeRoute}
+        userLocation={userLocation}
+        onSelectHazardOnMap={handleChatSelectHazard}
+        onSelectHubOnMap={handleChatSelectHub}
+      />
 
     </div>
   );

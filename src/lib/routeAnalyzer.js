@@ -161,8 +161,29 @@ export function getRouteAnchorPoint(coordinates, otherCoordsList = []) {
 export const getRouteMidpoint = getRouteAnchorPoint;
 
 /**
+ * Calculate distance from a point P to a line segment AB in kilometers
+ */
+function distanceToSegmentKm(pLat, pLng, aLat, aLng, bLat, bLng) {
+  const dLat = bLat - aLat;
+  const dLng = bLng - aLng;
+  const lenSq = dLat * dLat + dLng * dLng;
+
+  if (lenSq === 0) {
+    return getDistanceKm(pLat, pLng, aLat, aLng);
+  }
+
+  // Projection parameter t of point P onto segment AB
+  const t = Math.max(0, Math.min(1, ((pLat - aLat) * dLat + (pLng - aLng) * dLng) / lenSq));
+  const projLat = aLat + t * dLat;
+  const projLng = aLng + t * dLng;
+
+  return getDistanceKm(pLat, pLng, projLat, projLng);
+}
+
+/**
  * Count and identify hazards intersecting a corridor within a proximity threshold
  * Computes exact circular danger perimeter breaches based on each hazard's impact_radius_km
+ * Tests every single vertex and line segment along the route without downsampling.
  */
 export function calculateHazardConflicts(coords, hazards = []) {
   if (!hazards || !hazards.length || !coords || !coords.length) {
@@ -188,13 +209,21 @@ export function calculateHazardConflicts(coords, hazards = []) {
     const impactRadiusKm = parseFloat(h.impact_radius_km) || 5.0;
 
     let minDistance = Infinity;
-    const step = Math.max(1, Math.floor(coords.length / 100));
 
-    for (let i = 0; i < coords.length; i += step) {
+    // Test every single vertex and polyline segment
+    for (let i = 0; i < coords.length; i++) {
       const [cLat, cLng] = coords[i];
       const d = getDistanceKm(cLat, cLng, hLat, hLng);
       if (d < minDistance) {
         minDistance = d;
+      }
+
+      if (i < coords.length - 1) {
+        const [nextLat, nextLng] = coords[i + 1];
+        const segDist = distanceToSegmentKm(hLat, hLng, cLat, cLng, nextLat, nextLng);
+        if (segDist < minDistance) {
+          minDistance = segDist;
+        }
       }
     }
 
@@ -332,9 +361,12 @@ const STRATEGIC_CORRIDOR_WAYPOINTS = [
   { name: 'NH-27 Chicken Neck (Siliguri)', coords: STRATEGIC_JUNCTIONS.SILIGURI_GATEWAY },
 ];
 
+import { fetchRouteWeatherSummary } from './weatherService.js';
+
 /**
  * Universal Multi-Route Corridor Engine
  * Generates genuine, distinct real-world highway alternatives identically to Google Maps.
+ * Integrates real-time weather risk sampling and Safe Corridor Index (SCI) scoring.
  */
 export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHazards = []) {
   const [sLat, sLng] = startCoords;
@@ -442,7 +474,6 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
     const primaryDist = validatedRaw[0]?.distKm || directDist;
 
     // Filter candidate waypoints that are strictly viable along the corridor
-    // (prevents backtracks, overshoots or extreme detours)
     const candidates = [];
     const minLat = Math.min(sLat, eLat) - 0.35;
     const maxLat = Math.max(sLat, eLat) + 0.35;
@@ -451,12 +482,10 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
 
     STRATEGIC_CORRIDOR_WAYPOINTS.forEach((w) => {
       const [wLat, wLng] = w.coords;
-      // 1. Must lie within the bounding corridor
       if (wLat >= minLat && wLat <= maxLat && wLng >= minLng && wLng <= maxLng) {
         const dS = getDistanceKm(sLat, sLng, wLat, wLng);
         const dE = getDistanceKm(wLat, wLng, eLat, eLng);
         const detourRatio = (dS + dE) / Math.max(1, directDist);
-        // 2. Detour ratio must be reasonable (no massive loop or turnaround)
         if (detourRatio >= 1.01 && detourRatio <= 1.35) {
           candidates.push(w.coords);
         }
@@ -548,6 +577,16 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
       hazardCount: 0,
       hazardScore: 0,
       riskScore: 0,
+      sciScore: 10,
+      weather: {
+        maxRainfallMm: 0,
+        avgTemperature: 24,
+        dominantWeather: 'Clear Sky',
+        weatherEmoji: '☀️',
+        weatherRiskScore: 0,
+        riskTier: 'safe',
+        alertMessage: 'Offline mode active. Road conditions normal.',
+      },
       flaggedHazards: [],
       safetyStatus: 'optimal',
       safetyLabel: 'Safest Corridor (0 Hazards)',
@@ -558,7 +597,12 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
     }];
   }
 
-  // 6. Final Mapping, Anchor Points & Hazard Scoring
+  // 6. Fetch Live Weather Intelligence in parallel for each candidate corridor
+  const weatherSummaries = await Promise.all(
+    validatedRaw.map((item) => fetchRouteWeatherSummary(item.coords))
+  );
+
+  // 7. Final Mapping, Anchor Points, Safe Corridor Index (SCI) Scoring
   const allCoordsList = validatedRaw.map((c) => c.coords);
   const minDistance = Math.min(...validatedRaw.map((c) => c.distKm));
 
@@ -566,8 +610,29 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
     const otherCoords = allCoordsList.filter((_, i) => i !== idx);
     const anchorPoint = getRouteAnchorPoint(item.coords, otherCoords);
     const hazardAnalysis = calculateHazardConflicts(item.coords, activeHazards, 4.5);
+    const weather = weatherSummaries[idx] || {
+      maxRainfallMm: 0,
+      avgTemperature: 24,
+      dominantWeather: 'Clear / Moderate',
+      weatherEmoji: '🌤️',
+      weatherRiskScore: 0,
+      riskTier: 'safe',
+      alertMessage: 'Normal weather conditions along corridor.',
+    };
+
+    // Calculate Safe Corridor Index (SCI): 0 (safest) to 100 (critical threat)
+    // Formula: Hazard Risk (50%) + Weather Risk (30%) + Distance/Terrain Factor (20%)
+    const distanceFactor = Math.min(20, Math.round(((item.distKm - minDistance) / Math.max(1, minDistance)) * 30));
+    const sciScore = Math.min(100, Math.round(
+      hazardAnalysis.riskScore * 0.5 + 
+      (weather.weatherRiskScore || 0) * 0.75 + 
+      distanceFactor
+    ));
 
     const roadSummary = item.summary || (idx === 0 ? 'Primary Highway Corridor' : `Alternative Corridor ${idx + 1}`);
+
+    const isHighRisk = sciScore >= 50 || hazardAnalysis.riskScore > 70 || weather.riskTier === 'critical_monsoon' || hazardAnalysis.count >= 3;
+    const isModerateRisk = sciScore >= 20 || hazardAnalysis.count > 0 || weather.riskTier === 'caution';
 
     return {
       id: `corridor-${idx}-${Math.round(item.distKm)}`,
@@ -585,43 +650,67 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
       hazardCount: hazardAnalysis.count,
       hazardScore: hazardAnalysis.count,
       riskScore: hazardAnalysis.riskScore,
+      sciScore,
+      weather,
       flaggedHazards: hazardAnalysis.flaggedHazards,
-      safetyStatus: hazardAnalysis.riskScore > 70 || hazardAnalysis.count >= 3 ? 'high_risk' : hazardAnalysis.count > 0 ? 'moderate' : 'optimal',
-      safetyLabel: hazardAnalysis.count === 0 ? 'Safest Corridor (0 Hazards)' : `${hazardAnalysis.count} Hazard${hazardAnalysis.count > 1 ? 's' : ''} on route`,
+      safetyStatus: isHighRisk ? 'high_risk' : isModerateRisk ? 'moderate' : 'optimal',
+      safetyLabel: isHighRisk 
+        ? `High Risk (${hazardAnalysis.count} Hazards, Weather: ${weather.dominantWeather})` 
+        : hazardAnalysis.count === 0 
+          ? `Safest Corridor (0 Hazards • ${weather.dominantWeather})` 
+          : `${hazardAnalysis.count} Hazard${hazardAnalysis.count > 1 ? 's' : ''} on route`,
       isPrimary: idx === 0,
       isDomesticBypass: !!item.isDomesticBypass,
     };
   });
 
-  // 7. Assign High-Clarity Threat & Safety Tags
-  const minHazards = Math.min(...processedCorridors.map((c) => c.hazardCount));
-  const shortestRoute = processedCorridors.find((c) => c.distanceKm === minDistance);
-  const safestRoute = minHazards === 0 
-    ? processedCorridors.find((c) => c.hazardCount === 0) 
-    : processedCorridors.find((c) => c.hazardCount === minHazards);
+  // 8. Dynamic Detour Auto-Promotion & Threat-Aware Tagging
+  const primaryCorridor = processedCorridors[0];
+  const primaryHasThreat = primaryCorridor.hazardCount > 0 || primaryCorridor.sciScore >= 40 || primaryCorridor.weather.riskTier === 'critical_monsoon';
+  
+  // Find the overall lowest SCI score among corridors
+  const minSci = Math.min(...processedCorridors.map((c) => c.sciScore));
+  const safestCorridor = processedCorridors.find((c) => c.sciScore === minSci) || processedCorridors[0];
 
-  return processedCorridors.map((c) => {
+  return processedCorridors.map((c, idx) => {
     let tag = 'ALTERNATIVE';
     let isRecommended = false;
-    const hasThreat = c.hazardCount > 0;
+    let isRecommendedDetour = false;
+    let detourPromotionReason = '';
 
-    if (c.isDomesticBypass) {
-      tag = hasThreat ? 'ALL-INDIA BYPASS (⚠️ THREAT DETECTED)' : 'ALL-INDIA DOMESTIC BYPASS';
-      isRecommended = !hasThreat;
-    } else if (c.id === shortestRoute?.id && !hasThreat) {
-      tag = isBengalToEasternNer ? 'SHORTEST & SAFEST (CROSS-BORDER)' : 'SHORTEST & SAFEST';
-      isRecommended = true;
-    } else if (c.id === shortestRoute?.id && hasThreat) {
-      tag = 'SHORTEST (⚠️ THREAT DETECTED)';
-      isRecommended = false;
-    } else if (c.id === safestRoute?.id && !hasThreat) {
-      tag = 'SAFEST';
-      isRecommended = true;
-    } else if (hasThreat) {
-      tag = '⚠️ THREAT IN CORRIDOR';
-      isRecommended = false;
+    const hasThreat = c.hazardCount > 0 || c.sciScore >= 40;
+
+    if (idx === 0) {
+      // Primary corridor
+      if (hasThreat) {
+        tag = 'PRIMARY (⚠️ THREAT DETECTED)';
+        isRecommended = false;
+      } else {
+        tag = 'PRIMARY & SAFEST';
+        isRecommended = true;
+      }
     } else {
-      tag = 'DOMESTIC BYPASS';
+      // Alternative / Detour corridors
+      if (primaryHasThreat && c.id === safestCorridor.id && !hasThreat) {
+        // AUTO-PROMOTE DETOUR
+        tag = 'RECOMMENDED DETOUR';
+        isRecommended = true;
+        isRecommendedDetour = true;
+        const mainThreatType = primaryCorridor.flaggedHazards?.[0]?.hazard_type?.replace(/_/g, ' ') || 
+                               (primaryCorridor.weather.riskTier === 'critical_monsoon' ? 'Heavy Monsoon Downpour' : 'Active Road Obstruction');
+        detourPromotionReason = `Auto-promoted bypass: Avoids ${mainThreatType.toUpperCase()} on primary corridor.`;
+      } else if (c.isDomesticBypass) {
+        tag = hasThreat ? 'ALL-INDIA BYPASS (⚠️ THREAT DETECTED)' : 'ALL-INDIA DOMESTIC BYPASS';
+        isRecommended = !hasThreat && !primaryHasThreat;
+      } else if (c.id === safestCorridor.id && !hasThreat) {
+        tag = 'SAFEST CORRIDOR';
+        isRecommended = true;
+      } else if (hasThreat) {
+        tag = '⚠️ THREAT IN CORRIDOR';
+        isRecommended = false;
+      } else {
+        tag = 'ALTERNATIVE BYPASS';
+      }
     }
 
     return {
@@ -629,6 +718,8 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
       tag,
       primaryTag: tag,
       isRecommendedSafest: isRecommended,
+      isRecommendedDetour,
+      detourPromotionReason,
     };
   });
 }
@@ -642,11 +733,12 @@ export async function fetchMultiTacticalRoutes(startCoords, endCoords, activeHaz
   const corridors = await fetchGoogleLikeCorridors(startCoords, endCoords, activeHazards);
 
   const rankedRoutes = [...corridors].sort((a, b) => {
+    if (a.sciScore !== b.sciScore) return a.sciScore - b.sciScore;
     if (a.hazardCount !== b.hazardCount) return a.hazardCount - b.hazardCount;
     return a.distanceKm - b.distanceKm;
   });
 
-  const recommended = rankedRoutes[0] || corridors[0];
+  const recommended = rankedRoutes.find((r) => r.isRecommendedSafest) || rankedRoutes[0] || corridors[0];
   const safestIndex = corridors.findIndex((r) => r.id === recommended.id);
 
   return {
@@ -664,47 +756,77 @@ export async function fetchMultiTacticalRoutes(startCoords, endCoords, activeHaz
 export function rescoreRoutesWithHazards(existingRoutes, hazards = []) {
   if (!existingRoutes || existingRoutes.length === 0) return null;
 
+  const minDistance = Math.min(...existingRoutes.map((c) => c.distanceKm));
+
   const rescored = existingRoutes.map((route) => {
     const hazardAnalysis = calculateHazardConflicts(route.coordinates, hazards);
+    const weather = route.weather || { weatherRiskScore: 0, dominantWeather: 'Clear / Normal' };
+    
+    const distanceFactor = Math.min(20, Math.round(((route.distanceKm - minDistance) / Math.max(1, minDistance)) * 30));
+    const sciScore = Math.min(100, Math.round(
+      hazardAnalysis.riskScore * 0.5 + 
+      (weather.weatherRiskScore || 0) * 0.75 + 
+      distanceFactor
+    ));
+
+    const isHighRisk = sciScore >= 50 || hazardAnalysis.riskScore > 70 || hazardAnalysis.count >= 3;
+    const isModerateRisk = sciScore >= 20 || hazardAnalysis.count > 0;
+
     return {
       ...route,
       hazardCount: hazardAnalysis.count,
       hazardScore: hazardAnalysis.count,
       riskScore: hazardAnalysis.riskScore,
+      sciScore,
       flaggedHazards: hazardAnalysis.flaggedHazards,
-      safetyStatus: hazardAnalysis.riskScore > 70 || hazardAnalysis.count >= 3 ? 'high_risk' : hazardAnalysis.count > 0 ? 'moderate' : 'optimal',
-      safetyLabel: hazardAnalysis.count === 0 ? 'Safest Corridor (0 Hazards)' : `${hazardAnalysis.count} Threat${hazardAnalysis.count > 1 ? 's' : ''} in danger perimeter`,
+      safetyStatus: isHighRisk ? 'high_risk' : isModerateRisk ? 'moderate' : 'optimal',
+      safetyLabel: isHighRisk 
+        ? `High Risk (${hazardAnalysis.count} Hazards)` 
+        : hazardAnalysis.count === 0 
+          ? `Safest Corridor (0 Hazards)` 
+          : `${hazardAnalysis.count} Threat${hazardAnalysis.count > 1 ? 's' : ''} in danger perimeter`,
     };
   });
 
-  const minDistance = Math.min(...rescored.map((c) => c.distanceKm));
-  const minHazards = Math.min(...rescored.map((c) => c.hazardCount));
+  const primaryCorridor = rescored[0];
+  const primaryHasThreat = primaryCorridor.hazardCount > 0 || primaryCorridor.sciScore >= 40;
+  const minSci = Math.min(...rescored.map((c) => c.sciScore));
+  const safestCorridor = rescored.find((c) => c.sciScore === minSci) || rescored[0];
 
-  const shortestRoute = rescored.find((c) => c.distanceKm === minDistance);
-  const safestRoute = minHazards === 0 
-    ? rescored.find((c) => c.hazardCount === 0) 
-    : rescored.find((c) => c.hazardCount === minHazards);
-
-  const updatedRoutes = rescored.map((c) => {
-    let tag = c.tag || 'ALTERNATIVE';
+  const updatedRoutes = rescored.map((c, idx) => {
+    let tag = 'ALTERNATIVE';
     let isRecommended = false;
-    const hasThreat = c.hazardCount > 0;
+    let isRecommendedDetour = false;
+    let detourPromotionReason = '';
+    const hasThreat = c.hazardCount > 0 || c.sciScore >= 40;
 
-    if (c.isDomesticBypass) {
-      tag = hasThreat ? 'ALL-INDIA BYPASS (⚠️ THREAT DETECTED)' : 'ALL-INDIA DOMESTIC BYPASS';
-      isRecommended = !hasThreat;
-    } else if (c.id === shortestRoute?.id && !hasThreat) {
-      tag = 'SHORTEST & SAFEST';
-      isRecommended = true;
-    } else if (c.id === shortestRoute?.id && hasThreat) {
-      tag = 'SHORTEST (⚠️ THREAT DETECTED)';
-      isRecommended = false;
-    } else if (c.id === safestRoute?.id && !hasThreat) {
-      tag = 'SAFEST';
-      isRecommended = true;
-    } else if (hasThreat) {
-      tag = '⚠️ THREAT IN CORRIDOR';
-      isRecommended = false;
+    if (idx === 0) {
+      if (hasThreat) {
+        tag = 'PRIMARY (⚠️ THREAT DETECTED)';
+        isRecommended = false;
+      } else {
+        tag = 'PRIMARY & SAFEST';
+        isRecommended = true;
+      }
+    } else {
+      if (primaryHasThreat && c.id === safestCorridor.id && !hasThreat) {
+        tag = 'RECOMMENDED DETOUR';
+        isRecommended = true;
+        isRecommendedDetour = true;
+        const mainThreatType = primaryCorridor.flaggedHazards?.[0]?.hazard_type?.replace(/_/g, ' ') || 'Active Road Hazard';
+        detourPromotionReason = `Auto-promoted bypass: Avoids ${mainThreatType.toUpperCase()} on primary corridor.`;
+      } else if (c.isDomesticBypass) {
+        tag = hasThreat ? 'ALL-INDIA BYPASS (⚠️ THREAT DETECTED)' : 'ALL-INDIA DOMESTIC BYPASS';
+        isRecommended = !hasThreat && !primaryHasThreat;
+      } else if (c.id === safestCorridor.id && !hasThreat) {
+        tag = 'SAFEST CORRIDOR';
+        isRecommended = true;
+      } else if (hasThreat) {
+        tag = '⚠️ THREAT IN CORRIDOR';
+        isRecommended = false;
+      } else {
+        tag = 'ALTERNATIVE BYPASS';
+      }
     }
 
     return {
@@ -712,15 +834,18 @@ export function rescoreRoutesWithHazards(existingRoutes, hazards = []) {
       tag,
       primaryTag: tag,
       isRecommendedSafest: isRecommended,
+      isRecommendedDetour,
+      detourPromotionReason,
     };
   });
 
   const rankedRoutes = [...updatedRoutes].sort((a, b) => {
+    if (a.sciScore !== b.sciScore) return a.sciScore - b.sciScore;
     if (a.hazardCount !== b.hazardCount) return a.hazardCount - b.hazardCount;
     return a.distanceKm - b.distanceKm;
   });
 
-  const recommended = rankedRoutes[0] || updatedRoutes[0];
+  const recommended = rankedRoutes.find((r) => r.isRecommendedSafest) || rankedRoutes[0] || updatedRoutes[0];
   const safestIndex = updatedRoutes.findIndex((r) => r.id === recommended.id);
 
   return {

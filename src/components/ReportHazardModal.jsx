@@ -15,11 +15,25 @@ import {
   CheckCircle2, 
   Trash2,
   FileText,
-  MapPin
+  MapPin,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Sparkles,
+  Radio,
+  MessageSquareText,
+  Shield,
+  Users,
+  BarChart3,
+  Send,
+  CloudUpload,
+  Layers
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
 import { reverseGeocode } from '@/lib/geoUtils';
+import { validateNerLocation } from '@/lib/nerGeofence';
 
 export default function ReportHazardModal({ 
   isOpen = true, 
@@ -65,6 +79,189 @@ export default function ReportHazardModal({
   const [errorMsg, setErrorMsg] = useState(null);
 
   const fileInputRef = useRef(null);
+
+  // Multilingual Voice Assistant State
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceReply, setVoiceReply] = useState('');
+  const [detectedLang, setDetectedLang] = useState('');
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isVoiceComplete, setIsVoiceComplete] = useState(true);
+  const [voiceMissingFields, setVoiceMissingFields] = useState([]);
+  const [voiceActiveTurn, setVoiceActiveTurn] = useState(false);
+
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const speechRef = useRef(null);
+
+  // Voice Recording Functions
+  const startRecording = async () => {
+    setErrorMsg(null);
+    if (isSpeaking) {
+      stopSpeech();
+    }
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setErrorMsg('Voice recording is not supported in this browser environment.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const tracks = stream.getTracks();
+        tracks.forEach((track) => track.stop());
+
+        if (audioChunksRef.current.length === 0) return;
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        await processAudioWithGemini(audioBlob);
+      };
+
+      recorder.start(250);
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingTime(0);
+      setVoiceActiveTurn(true);
+
+      timerRef.current = setInterval(() => {
+        setRecordingTime((prev) => {
+          if (prev >= 30) {
+            stopRecording();
+            return 30;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch (err) {
+      if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+        setErrorMsg('Microphone access was blocked or denied. Please click the permissions icon (tune / lock) in your browser address bar and allow Microphone access.');
+      } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
+        setErrorMsg('No microphone device found on this system.');
+      } else {
+        setErrorMsg('Microphone unavailable: ' + (err?.message || 'Please check microphone permissions.'));
+      }
+    }
+  };
+
+  const stopRecording = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  };
+
+  const speakVoiceReply = (text, language) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    const langLower = (language || '').toLowerCase();
+
+    if (langLower.includes('hindi')) utterance.lang = 'hi-IN';
+    else if (langLower.includes('bengali') || langLower.includes('bangla')) utterance.lang = 'bn-IN';
+    else if (langLower.includes('assamese')) utterance.lang = 'as-IN';
+    else if (langLower.includes('manipuri')) utterance.lang = 'mni-IN';
+    else utterance.lang = 'en-IN';
+
+    utterance.rate = 0.95;
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+
+    speechRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const stopSpeech = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
+  };
+
+  const processAudioWithGemini = async (blob) => {
+    setIsProcessingVoice(true);
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise((resolve) => {
+        reader.onloadend = () => resolve(reader.result);
+      });
+      reader.readAsDataURL(blob);
+      const audioBase64 = await base64Promise;
+
+      const res = await fetch('/api/ai/voice-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          audioBase64,
+          mimeType: 'audio/webm',
+          currentFormData: {
+            hazardType,
+            severity,
+            description,
+            state,
+            district,
+            latitude: latInput,
+            longitude: lngInput,
+          },
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to analyze voice input.');
+      }
+
+      const data = json.data;
+      setVoiceTranscript(data.original_transcript || '');
+      setVoiceReply(data.voice_reply_prompt || '');
+      setDetectedLang(data.detected_language || 'Detected');
+      setIsVoiceComplete(!!data.is_complete);
+      setVoiceMissingFields(data.missing_fields || []);
+
+      // Voice assistant is ONLY for the description fill up
+      const generatedDesc = data.description_summary || data.original_transcript || '';
+      if (generatedDesc) {
+        setDescription(generatedDesc);
+      }
+
+      // Read out voice response confirmation to driver
+      if (data.voice_reply_prompt) {
+        speakVoiceReply(data.voice_reply_prompt, data.detected_language);
+      }
+    } catch (e) {
+      console.warn('Voice processing notice:', e?.message || e);
+      setErrorMsg('Voice assistant notice: ' + (e?.message || 'Unable to analyze audio.'));
+    } finally {
+      setIsProcessingVoice(false);
+    }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   // Initialize or update coords if initialCoords changes
   useEffect(() => {
@@ -118,7 +315,7 @@ export default function ReportHazardModal({
   const fetchLocation = () => {
     setLocating(true);
     setErrorMsg(null);
-    if (!navigator.geolocation) {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setErrorMsg('Geolocation is not supported by your browser.');
       setLocating(false);
       return;
@@ -135,7 +332,15 @@ export default function ReportHazardModal({
         setCoordMode('gps');
       },
       (err) => {
-        setErrorMsg('Could not fetch GPS location: ' + err.message);
+        if (err?.code === 1 /* PERMISSION_DENIED */) {
+          setErrorMsg('Location permission was denied. Please allow location permissions in your browser or click on the map to set coordinates.');
+        } else if (err?.code === 2 /* POSITION_UNAVAILABLE */) {
+          setErrorMsg('GPS location unavailable. Please select your location on the map.');
+        } else if (err?.code === 3 /* TIMEOUT */) {
+          setErrorMsg('GPS location timed out. Please try again or select your location on the map.');
+        } else {
+          setErrorMsg('Could not fetch GPS location: ' + (err?.message || 'Unknown error.'));
+        }
         setLocating(false);
       },
       { enableHighAccuracy: true, timeout: 10000 }
@@ -245,13 +450,14 @@ export default function ReportHazardModal({
   const mapHazardType = (type) => {
     if (!type || typeof type !== 'string') return 'landslide';
     const normalized = type.toLowerCase().replace(/[\s-]/g, '_');
-    const valid = ['landslide', 'flash_flood', 'road_washout', 'tree_fall', 'heavy_waterlogging', 'bridge_damage'];
+    const valid = ['landslide', 'flash_flood', 'road_washout', 'tree_fall', 'heavy_waterlogging', 'bridge_damage', 'other'];
     if (valid.includes(normalized)) return normalized;
+    if (normalized.includes('other')) return 'other';
     if (normalized.includes('flood')) return 'flash_flood';
     if (normalized.includes('bridge')) return 'bridge_damage';
     if (normalized.includes('cave') || normalized.includes('blockade')) return 'road_washout';
     if (normalized.includes('mud') || normalized.includes('rock')) return 'landslide';
-    return 'landslide';
+    return 'other';
   };
 
   const mapSeverity = (sev) => {
@@ -260,6 +466,56 @@ export default function ReportHazardModal({
     const valid = ['low', 'medium', 'high', 'critical'];
     return valid.includes(normalized) ? normalized : 'high';
   };
+
+  // Fast client-side image compression & downscaling for instant AI inspection
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    if (!file) return reject(new Error('No file provided'));
+
+    // For non-images (videos), read as standard Base64
+    if (!file.type || !file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = () => resolve({ data: reader.result, mimeType: file.type || 'video/mp4' });
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    // For images, resize to max 1024px to shrink payload by 98% and speed up AI inference
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_DIM = 1024;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > MAX_DIM || height > MAX_DIM) {
+          if (width > height) {
+            height = Math.round((height * MAX_DIM) / width);
+            width = MAX_DIM;
+          } else {
+            width = Math.round((width * MAX_DIM) / height);
+            height = MAX_DIM;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        resolve({ data: compressedDataUrl, mimeType: 'image/jpeg' });
+      };
+      img.onerror = () => {
+        resolve({ data: e.target.result, mimeType: file.type || 'image/jpeg' });
+      };
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -274,6 +530,13 @@ export default function ReportHazardModal({
     }
     if (finalLat < -90 || finalLat > 90 || finalLng < -180 || finalLng > 180) {
       setErrorMsg('Coordinates out of valid geographic range (Lat -90..90, Lng -180..180).');
+      return;
+    }
+
+    // 2. Enforce NER Regional Boundary Geofence Check
+    const geofenceResult = validateNerLocation(finalLat, finalLng);
+    if (!geofenceResult.isInside) {
+      setErrorMsg(`❌ Out of Operational Zone: ${geofenceResult.reason || 'Hazard coordinates must be inside the 8 North-Eastern states.'}`);
       return;
     }
 
@@ -299,12 +562,60 @@ export default function ReportHazardModal({
 
     setSubmitting(true);
     setErrorMsg(null);
-    setUploadProgress('Uploading media evidence (0/3)...');
+    setUploadProgress('🤖 Running Gemini AI disaster forensic inspection on evidence...');
 
     try {
+      // 3. Convert media to Base64 for instant AI Pre-Screening BEFORE Storage Upload
+      const base64List = await Promise.all(
+        mediaItems.map((item) => fileToBase64(item.file))
+      );
+
+      // 4. Gemini Multimodal Disaster Authenticity Forensic Pre-Screen
+      let verifyData = null;
+      try {
+        const verifyRes = await fetch('/api/ai/verify-hazard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mediaBase64List: base64List,
+            declaredHazardType: mapHazardType(hazardType),
+            declaredSeverity: mapSeverity(severity),
+            description: description.trim(),
+            state: state || 'Assam',
+            district: district || '',
+          }),
+        });
+
+        verifyData = await verifyRes.json();
+        if (!verifyRes.ok || !verifyData?.success) {
+          setErrorMsg(`⚠️ AI Forensic Service Error: ${verifyData?.error || 'Failed to complete image authenticity verification.'}`);
+          setSubmitting(false);
+          setUploadProgress('');
+          return; // HARD STOP!
+        }
+      } catch (fetchErr) {
+        setErrorMsg(`⚠️ AI Forensic Connection Failure: ${fetchErr.message || 'Unable to connect to verification server.'}`);
+        setSubmitting(false);
+        setUploadProgress('');
+        return; // HARD STOP!
+      }
+
+      // 5. HARD REJECTION GATE: If AI detects non-disaster, screenshot, fake media, or invalid/gibberish description
+      if (!verifyData?.verified || !verifyData?.analysis?.is_real_hazard || !verifyData?.analysis?.is_description_valid) {
+        const rejectReason = verifyData?.analysis?.rejection_reason || 
+          verifyData?.analysis?.verdict_summary || 
+          'The hazard report could not be verified due to invalid media evidence or meaningless description context.';
+        
+        setErrorMsg(`🚫 AI Verification Rejected: ${rejectReason}`);
+        setSubmitting(false);
+        setUploadProgress('');
+        return; // HARD STOP! Do NOT upload to storage and do NOT insert into database!
+      }
+
+      // 6. Media passed AI validation: Proceed to upload evidence to Supabase Storage
+      setUploadProgress(`Uploading ${mediaItems.length} verified media file(s)...`);
       const uploadedUrls = [];
 
-      // 2. Upload up to 3 media files (images or videos) to Supabase Storage
       for (let i = 0; i < mediaItems.length; i++) {
         const item = mediaItems[i];
         setUploadProgress(`Uploading media ${i + 1} of ${mediaItems.length}...`);
@@ -335,7 +646,7 @@ export default function ReportHazardModal({
         }
       }
 
-      setUploadProgress('Finalizing hazard incident record...');
+      setUploadProgress('Saving verified disaster incident record...');
 
       const reporterRole = isNodalOfficer ? 'nodal_officer' : 'citizen_driver';
       const reporterName = isNodalOfficer
@@ -360,7 +671,7 @@ export default function ReportHazardModal({
       const realState = finalPlace?.state || (state && state !== 'Assam' ? state : null) || effectiveProfile?.state || nodalOfficer?.state || 'Assam';
       const realDistrict = finalPlace?.district || finalPlace?.locality || (district && district !== 'Unspecified Sector' ? district : null) || 'Central Sector';
 
-      // 3. Resilient Insert payload (handles both citizen drivers and nodal officers gracefully)
+      // 7. Insert payload into Supabase with full AI forensic audit data
       const userId = isNodalOfficer ? null : (user?.id || null);
       const primaryMediaUrl = (uploadedUrls && uploadedUrls.length > 0) ? uploadedUrls[0] : null;
 
@@ -382,7 +693,12 @@ export default function ReportHazardModal({
         reported_by_role: reporterRole,
         reported_by_name: reporterName,
         reported_by_contact: reporterContact,
-        is_verified: !!isNodalOfficer,
+        is_verified: true,
+        ai_verified: true,
+        ai_confidence: verifyData?.analysis?.authenticity_confidence || 0.9,
+        ai_hazard_type: verifyData?.analysis?.detected_hazard_type || dbHazardType,
+        ai_verdict_summary: verifyData?.analysis?.verdict_summary || null,
+        ai_analysis_raw: verifyData?.analysis || null,
       };
 
       // Try inserting with full payload
@@ -392,12 +708,17 @@ export default function ReportHazardModal({
         .select()
         .single();
 
-      // Graceful fallback if database schema cache lacks 'reported_by_id', 'media_urls', or 'impact_radius_km'
-      if (dbError && (dbError.message?.includes('reported_by_id') || dbError.message?.includes('media_urls') || dbError.message?.includes('impact_radius_km') || dbError.code === 'PGRST204')) {
+      // Graceful fallback if database schema cache lacks optional columns
+      if (dbError && (dbError.message?.includes('reported_by_id') || dbError.message?.includes('media_urls') || dbError.message?.includes('impact_radius_km') || dbError.message?.includes('ai_') || dbError.code === 'PGRST204')) {
         console.warn('Retrying hazard insertion without optional unmigrated columns:', dbError.message);
         const fallbackPayload = { ...basePayload };
         delete fallbackPayload.reported_by_id;
         delete fallbackPayload.media_urls;
+        delete fallbackPayload.ai_verified;
+        delete fallbackPayload.ai_confidence;
+        delete fallbackPayload.ai_hazard_type;
+        delete fallbackPayload.ai_verdict_summary;
+        delete fallbackPayload.ai_analysis_raw;
         if (dbError.message?.includes('impact_radius_km')) {
           delete fallbackPayload.impact_radius_km;
         }
@@ -433,388 +754,636 @@ export default function ReportHazardModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150 font-sans">
-      <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200/90 my-auto flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-3 sm:p-5 overflow-y-auto animate-in fade-in duration-200 font-sans">
+      <div className="relative w-full max-w-5xl bg-white dark:bg-[#0f172a] rounded-3xl shadow-2xl border border-slate-200/90 dark:border-slate-800 overflow-hidden flex flex-col md:flex-row my-auto max-h-[94vh]">
         
-        {/* 1. Dark Top Header Bar */}
-        <div className="bg-[#1a2530] px-5 sm:px-6 py-4 flex items-center justify-between text-white shrink-0">
-          <div className="flex items-center space-x-2.5">
-            <div className="w-7 h-7 rounded-lg bg-red-500/20 border border-red-500/40 flex items-center justify-center text-red-400">
-              <AlertTriangle className="w-4 h-4" />
+        {/* =========================================================================
+            LEFT BRANDED SIDEBAR (Full-Bleed Road Hazard Image, Highlights, Tagline)
+           ========================================================================= */}
+        <div className="w-full md:w-[280px] lg:w-[320px] shrink-0 relative overflow-hidden flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-200/80 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 min-h-[360px] md:min-h-[580px]">
+          {/* Full-bleed background image covering 100% of the left panel (slightly zoomed out and with decreased opacity) */}
+          <img
+            src="/road%20hazard.jpg"
+            alt="Road Hazard Terrain in North-East India"
+            className="absolute inset-0 w-full h-full object-cover object-center scale-95 opacity-80 transition-all"
+          />
+          
+          {/* Balanced gradient overlay: clear readable tone at top, gentle blend through middle, and dark vignette at bottom */}
+          <div className="absolute inset-0 bg-gradient-to-b from-slate-50/95 via-slate-50/50 via-35% to-black/85 dark:from-[#0b1220]/95 dark:via-[#0b1220]/50 dark:via-35% dark:to-black/90 pointer-events-none" />
+
+          {/* Top Section */}
+          <div className="relative z-10 p-5 sm:p-6 pb-2 space-y-4">
+            {/* Top Brand Header */}
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+                <Radio className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-extrabold tracking-tight text-slate-900 dark:text-white leading-none">
+                  NER-LOGIX
+                </h2>
+                <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mt-0.5">
+                  Tactical Logistics
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-base font-bold text-white tracking-wide leading-tight">
-                New Hazard Report
-              </h3>
-              <p className="text-[10px] text-slate-400 font-mono">
-                All fields are compulsory • Up to 3 photos/videos
+
+            {/* Feature Highlights with Frosted Glass Protection */}
+            <div className="space-y-2.5 my-4">
+              {/* 1. Faster Response */}
+              <div className="flex items-center gap-2.5 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md p-2 rounded-xl border border-white/80 dark:border-slate-700/60 shadow-2xs">
+                <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200/80 dark:border-blue-800/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                  <Shield className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                    Faster Response
+                  </h4>
+                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight font-medium">
+                    Real-time alerts to field teams
+                  </p>
+                </div>
+              </div>
+
+              {/* 2. Safer Communities */}
+              <div className="flex items-center gap-2.5 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md p-2 rounded-xl border border-white/80 dark:border-slate-700/60 shadow-2xs">
+                <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <Users className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                    Safer Communities
+                  </h4>
+                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight font-medium">
+                    Your reports save lives
+                  </p>
+                </div>
+              </div>
+
+              {/* 3. Stronger Logistics */}
+              <div className="flex items-center gap-2.5 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md p-2 rounded-xl border border-white/80 dark:border-slate-700/60 shadow-2xs">
+                <div className="w-7 h-7 rounded-lg bg-purple-50 dark:bg-purple-950/50 border border-purple-200/80 dark:border-purple-800/60 flex items-center justify-center text-purple-600 dark:text-purple-400 shrink-0">
+                  <BarChart3 className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                    Stronger Logistics
+                  </h4>
+                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight font-medium">
+                    Reliable disaster telemetry
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Inspirational Quote */}
+            <div className="pt-1">
+              <p className="text-sm font-bold italic text-slate-800 dark:text-slate-100 font-serif drop-shadow-xs">
+                &ldquo;Every report builds a safer tomorrow.&rdquo;
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          {/* Bottom Tagline Overlaid over the Road Hazard Terrain */}
+          <div className="relative z-10 p-5 sm:p-6 pt-12">
+            <div className="pt-3 border-t border-white/30 dark:border-white/20">
+              <p className="text-[11.5px] text-white font-bold drop-shadow-md tracking-wider uppercase">
+                Secure Routes • Stronger Northeast
+              </p>
+            </div>
+          </div>
         </div>
 
-        {/* 2. Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1 bg-white">
+        {/* =========================================================================
+            RIGHT MAIN FORM (Structured 5-Step Numbered Manifest)
+           ========================================================================= */}
+        <div className="flex-1 bg-white dark:bg-[#0f172a] flex flex-col overflow-hidden">
           
-          {/* Location Card with Pin Hazard Location & Lat/Lng Inputs */}
-          <div className="bg-[#faf6ee] border border-[#eee4d0] rounded-2xl p-3.5 space-y-3">
-            
-            {/* Action Bar with Pin Location & Live GPS */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleStartMapPickClick}
-                className="flex-1 py-2.5 px-3 bg-[#24424d] hover:bg-[#1a333c] text-white rounded-xl font-medium text-xs flex items-center justify-center space-x-2 shadow-xs transition-all cursor-pointer"
-              >
-                <Map className="w-4 h-4 text-cyan-300" />
-                <span>Pin Hazard Location</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={fetchLocation}
-                disabled={locating}
-                className="py-2.5 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-[#e5d9c5] rounded-xl font-medium text-xs flex items-center justify-center space-x-1.5 shadow-xs transition-all cursor-pointer disabled:opacity-50"
-                title="Fetch live device GPS"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-cyan-600 ${locating ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">Use GPS</span>
-              </button>
-            </div>
-
-            {/* Latitude & Longitude Inputs (Compulsory) */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  LATITUDE <span className="text-red-500 font-black">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  required
-                  value={latInput}
-                  onChange={handleLatChange}
-                  placeholder="e.g. 26.144500"
-                  className="w-full bg-white border border-[#e5d9c5] rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#24424d] shadow-xs"
-                />
+          {/* Header */}
+          <div className="p-5 sm:p-6 pb-4 flex items-start justify-between border-b border-slate-100 dark:border-slate-800/80 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-rose-600 text-white shadow-md shadow-rose-500/20">
+                <AlertTriangle className="w-5 h-5" />
               </div>
-
               <div>
-                <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  LONGITUDE <span className="text-red-500 font-black">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  required
-                  value={lngInput}
-                  onChange={handleLngChange}
-                  placeholder="e.g. 91.736200"
-                  className="w-full bg-white border border-[#e5d9c5] rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#24424d] shadow-xs"
-                />
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
+                    Report Field Hazard
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800/60">
+                    FORENSIC DISPATCH
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                  Provide verified field intelligence to safeguard relief supply corridors
+                </p>
               </div>
             </div>
 
-            {/* Real-World Place Detection Banner */}
-            {isGeocoding ? (
-              <div className="p-2.5 bg-blue-50/80 border border-blue-200/80 rounded-xl flex items-center space-x-2 text-[11px] font-mono text-blue-800 animate-pulse">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 shrink-0" />
-                <span>Identifying real-world location & road sector...</span>
-              </div>
-            ) : detectedLocation ? (
-              <div className="p-2.5 bg-white border border-emerald-200 rounded-xl flex items-start space-x-2 text-[11px] shadow-2xs animate-in fade-in">
-                <MapPin className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center space-x-1.5 font-bold text-emerald-900 text-xs">
-                    <span>📍 {detectedLocation.formattedSummary}</span>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              aria-label="Close modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Form Content */}
+          <form onSubmit={handleSubmit} className="p-5 sm:p-6 overflow-y-auto space-y-5 max-h-[calc(94vh-140px)]">
+
+            {/* ----------------------------------------------------
+                STEP 1: LOCATION & COORDINATES
+               ---------------------------------------------------- */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                    1
+                  </span>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      Location & Coordinates
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Pin epicenter on map or fetch current device GPS
+                    </p>
                   </div>
-                  {detectedLocation.displayName && (
-                    <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">
-                      {detectedLocation.displayName}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleStartMapPickClick}
+                    className="px-3 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/80 dark:border-slate-700"
+                  >
+                    <Map className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                    <span>Pin on Map</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={fetchLocation}
+                    disabled={locating}
+                    className="px-3 py-1 rounded-xl bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-600 dark:text-blue-400 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-blue-200/80 dark:border-blue-800/60 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-blue-600 dark:text-blue-400 ${locating ? 'animate-spin' : ''}`} />
+                    <span>Use My GPS</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="bg-white dark:bg-slate-800/80 border border-slate-200/90 dark:border-slate-700 rounded-2xl px-3.5 py-2 flex items-center gap-2.5 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+                  <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
+                  <div className="flex-1">
+                    <span className="block text-[9.5px] font-semibold text-slate-400 dark:text-slate-400">
+                      Latitude <span className="text-rose-500">*</span>
+                    </span>
+                    <input
+                      type="number"
+                      step="any"
+                      required
+                      value={latInput}
+                      onChange={handleLatChange}
+                      placeholder="e.g. 26.144500"
+                      className="bg-transparent text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none w-full font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-800/80 border border-slate-200/90 dark:border-slate-700 rounded-2xl px-3.5 py-2 flex items-center gap-2.5 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+                  <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
+                  <div className="flex-1">
+                    <span className="block text-[9.5px] font-semibold text-slate-400 dark:text-slate-400">
+                      Longitude <span className="text-rose-500">*</span>
+                    </span>
+                    <input
+                      type="number"
+                      step="any"
+                      required
+                      value={lngInput}
+                      onChange={handleLngChange}
+                      placeholder="e.g. 91.736200"
+                      className="bg-transparent text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none w-full font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Reverse Geocoding Place Box */}
+              {isGeocoding ? (
+                <div className="p-2.5 bg-blue-50/70 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/50 rounded-xl flex items-center gap-2 text-xs text-blue-700 dark:text-cyan-400 animate-pulse">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 dark:text-cyan-400 shrink-0" />
+                  <span>Resolving district and sector boundaries...</span>
+                </div>
+              ) : detectedLocation ? (
+                <div className="p-2.5 bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/60 rounded-xl flex items-center gap-2 text-xs text-emerald-900 dark:text-emerald-200">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="font-semibold truncate">📍 {detectedLocation.formattedSummary}</span>
+                </div>
+              ) : null}
+            </div>
+
+            {/* ----------------------------------------------------
+                STEP 2: HAZARD CLASSIFICATION
+               ---------------------------------------------------- */}
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2.5">
+                <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                  2
+                </span>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                    Hazard Classification
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Select incident category and disruption level
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 rounded-2xl p-2.5 flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 shrink-0">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="block text-[9.5px] font-semibold text-slate-400 dark:text-slate-400">
+                      Hazard Type <span className="text-rose-500">*</span>
+                    </span>
+                    <select
+                      value={hazardType}
+                      required
+                      onChange={(e) => setHazardType(e.target.value)}
+                      className="w-full bg-transparent text-xs text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer truncate"
+                    >
+                      <option value="landslide" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">🪨 Landslide / Rockfall</option>
+                      <option value="flash_flood" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">🌊 Flash Flood / Washout</option>
+                      <option value="road_washout" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">🚧 Road Cave-in / Collapse</option>
+                      <option value="bridge_damage" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">🌉 Bridge / Culvert Damage</option>
+                      <option value="tree_fall" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">🌲 Tree Fall / Debris</option>
+                      <option value="heavy_waterlogging" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">🌧️ Severe Waterlogging</option>
+                      <option value="other" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">⚠️ Others / Unspecified Hazard</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 rounded-2xl p-2.5 flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
+                    <Shield className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="block text-[9.5px] font-semibold text-slate-400 dark:text-slate-400">
+                      Severity Level <span className="text-rose-500">*</span>
+                    </span>
+                    <select
+                      value={severity}
+                      required
+                      onChange={(e) => setSeverity(e.target.value)}
+                      className="w-full bg-transparent text-xs text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer truncate"
+                    >
+                      <option value="critical" className="bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 font-bold">🛑 Critical (Total Blockade)</option>
+                      <option value="high" className="bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400">🔴 High (Major Disruption)</option>
+                      <option value="medium" className="bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400">🟡 Medium (Caution / Slow)</option>
+                      <option value="low" className="bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400">🟢 Low (Passable with Caution)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ----------------------------------------------------
+                STEP 3: THREAT IMPACT RADIUS
+               ---------------------------------------------------- */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                    3
+                  </span>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      Threat Danger Radius
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Estimated hazard perimeter buffer zone
+                    </p>
+                  </div>
+                </div>
+
+                <span className="text-xs font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-3 py-1 rounded-xl border border-blue-200/80 dark:border-blue-800/60">
+                  {impactRadiusKm} km Perimeter
+                </span>
+              </div>
+
+              {/* Preset Buttons */}
+              <div className="grid grid-cols-5 gap-1.5 pt-0.5">
+                {[
+                  { val: 1.0, label: '1 km' },
+                  { val: 3.0, label: '3 km' },
+                  { val: 5.0, label: '5 km (Std)' },
+                  { val: 10.0, label: '10 km' },
+                  { val: 20.0, label: '20 km' },
+                ].map((p) => {
+                  const isSelected = parseFloat(impactRadiusKm) === p.val;
+                  return (
+                    <button
+                      key={`radius-btn-${p.val}`}
+                      type="button"
+                      onClick={() => setImpactRadiusKm(p.val)}
+                      className={`py-2 px-1 rounded-xl text-xs font-semibold transition-all border cursor-pointer text-center ${
+                        isSelected
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                          : 'bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-slate-700/70 hover:bg-slate-100 dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Slider */}
+              <div className="pt-1">
+                <input
+                  type="range"
+                  min="0.5"
+                  max="25"
+                  step="0.5"
+                  value={impactRadiusKm}
+                  onChange={(e) => setImpactRadiusKm(parseFloat(e.target.value))}
+                  className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                />
+              </div>
+            </div>
+
+            {/* ----------------------------------------------------
+                STEP 4: DESCRIPTION & VOICE DICTATION
+               ---------------------------------------------------- */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                    4
+                  </span>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      Description & Clearance Status
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Field dispatch details or multilingual voice dictation
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  {voiceReply && (
+                    <button
+                      type="button"
+                      onClick={isSpeaking ? stopSpeech : () => speakVoiceReply(voiceReply, detectedLang)}
+                      className={`px-2.5 py-1 rounded-xl border text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                        isSpeaking
+                          ? 'bg-blue-600 text-white border-blue-600 animate-pulse'
+                          : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                      }`}
+                      title={isSpeaking ? "Stop Voice Playback" : "Replay Spoken Confirmation"}
+                    >
+                      {isSpeaking ? <VolumeX className="w-3.5 h-3.5 text-white" /> : <Volume2 className="w-3.5 h-3.5 text-slate-500" />}
+                      <span className="hidden sm:inline">{isSpeaking ? 'Mute' : 'Replay'}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={isRecording ? stopRecording : startRecording}
+                    disabled={isProcessingVoice}
+                    className={`text-xs font-semibold px-3 py-1 rounded-xl flex items-center gap-1.5 cursor-pointer transition-all border ${
+                      isRecording
+                        ? 'bg-red-600 text-white border-red-500 shadow-red-500/40 shadow-xs animate-pulse ring-2 ring-red-400'
+                        : isProcessingVoice
+                        ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800'
+                        : 'text-blue-600 dark:text-blue-400 hover:text-blue-700 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 border-blue-200/80 dark:border-blue-800/60'
+                    }`}
+                    title="Dictate in Hindi, Assamese, Bengali, or English to fill description"
+                  >
+                    {isProcessingVoice ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 dark:text-cyan-400" />
+                        <span>Transcribing...</span>
+                      </>
+                    ) : isRecording ? (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                        <MicOff className="w-3.5 h-3.5" />
+                        <span className="font-mono">{recordingTime}s • Stop</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="w-3.5 h-3.5 text-blue-600 dark:text-cyan-400" />
+                        <span>Voice Dictate</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative">
+                <textarea
+                  rows={3}
+                  required
+                  maxLength={500}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="e.g. NH-27 blocked 3km past Haflong due to major rockfall. Excavators active, single lane blocked."
+                  className="w-full bg-white dark:bg-slate-800/80 border border-slate-200/90 dark:border-slate-700 rounded-2xl p-3 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 shadow-2xs resize-none leading-relaxed transition-all"
+                />
+                <div className="text-right text-[10px] text-slate-400 font-mono -mt-1 mr-1">
+                  {description.length}/500
+                </div>
+              </div>
+
+              {/* Dynamic Voice Dictation Feedback Pill */}
+              {voiceActiveTurn && (voiceTranscript || voiceReply || isProcessingVoice) && (
+                <div className="p-3 bg-slate-900 text-white rounded-2xl text-xs space-y-1.5 border border-slate-800 shadow-md animate-in fade-in">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="font-bold text-cyan-400 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Gemini Voice Dictation ({detectedLang || 'Listening'})</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setVoiceActiveTurn(false)}
+                      className="text-slate-400 hover:text-white text-xs cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {voiceTranscript && (
+                    <p className="text-[11px] text-slate-300 italic">
+                      🎙️ <span className="font-semibold text-slate-200">Heard:</span> &ldquo;{voiceTranscript}&rdquo;
+                    </p>
+                  )}
+                  {voiceReply && (
+                    <div className="text-[11px] text-cyan-200 font-medium pt-1 border-t border-slate-800 flex items-start justify-between gap-2">
+                      <span>🤖 {voiceReply}</span>
                     </div>
                   )}
                 </div>
-              </div>
-            ) : null}
-
-          </div>
-
-          {/* Hazard Type & Severity Level Grid (Compulsory) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                HAZARD TYPE <span className="text-red-500 font-black">*</span>
-              </label>
-              <select
-                value={hazardType}
-                required
-                onChange={(e) => setHazardType(e.target.value)}
-                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#24424d] shadow-xs cursor-pointer"
-              >
-                <option value="landslide">Landslide/Rockfall</option>
-                <option value="flash_flood">Flash Flood/Washout</option>
-                <option value="road_washout">Road Cave-in/Collapse</option>
-                <option value="bridge_damage">Bridge/Culvert Damage</option>
-                <option value="tree_fall">Tree Fall/Debris</option>
-                <option value="heavy_waterlogging">Severe Waterlogging</option>
-              </select>
+              )}
             </div>
 
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                SEVERITY LEVEL <span className="text-red-500 font-black">*</span>
-              </label>
-              <select
-                value={severity}
-                required
-                onChange={(e) => setSeverity(e.target.value)}
-                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#24424d] shadow-xs cursor-pointer"
-              >
-                <option value="critical">🛑 Critical (Total Blockade)</option>
-                <option value="high">🔴 High (Critical Damage)</option>
-                <option value="medium">🟡 Medium (Caution / Slow Transit)</option>
-                <option value="low">🟢 Low (Passable with Caution)</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Threat Impact Radius / Danger Zone (Compulsory) */}
-          <div className="space-y-2 bg-[#f4ebe1] dark:bg-slate-800/80 p-3 rounded-2xl border border-[#e5d9c5] dark:border-slate-700 shadow-xs">
-            <div className="flex items-center justify-between">
-              <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span>THREAT IMPACT RADIUS <span className="text-red-500 font-black">*</span></span>
-              </label>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800">
-                🎯 {impactRadiusKm} km Danger Perimeter
-              </span>
-            </div>
-
-            {/* Quick Preset Buttons */}
-            <div className="grid grid-cols-5 gap-1.5 pt-0.5">
-              {[
-                { val: 1.0, label: '1 km' },
-                { val: 3.0, label: '3 km' },
-                { val: 5.0, label: '5 km (Std)' },
-                { val: 10.0, label: '10 km' },
-                { val: 20.0, label: '20 km' },
-              ].map((p) => {
-                const isSelected = parseFloat(impactRadiusKm) === p.val;
-                return (
-                  <button
-                    key={`radius-btn-${p.val}`}
-                    type="button"
-                    onClick={() => setImpactRadiusKm(p.val)}
-                    className={`py-1 px-1 rounded-xl text-[10px] font-mono font-bold transition-all border cursor-pointer text-center ${
-                      isSelected
-                        ? 'bg-red-600 text-white border-red-600 shadow-xs ring-2 ring-red-400/40'
-                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-red-400'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Slider */}
-            <div className="pt-1 flex items-center space-x-2">
-              <input
-                type="range"
-                min="0.5"
-                max="25"
-                step="0.5"
-                value={impactRadiusKm}
-                onChange={(e) => setImpactRadiusKm(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-red-600"
-              />
-              <span className="text-[10px] font-mono text-slate-600 dark:text-slate-400 font-bold shrink-0 min-w-[38px] text-right">
-                {impactRadiusKm} km
-              </span>
-            </div>
-          </div>
-
-          {/* Field Description & Clearance Status (Compulsory) */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider">
-                FIELD DESCRIPTION & CLEARANCE STATUS <span className="text-red-500 font-black">*</span>
-              </label>
-              <span className="text-[9px] font-mono text-slate-400">Compulsory</span>
-            </div>
-            <textarea
-              rows={3}
-              required
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. NH-27 blocked 3km past Haflong due to rockfall. Excavators on-site, single lane blocked."
-              className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#24424d] shadow-xs resize-none leading-relaxed"
-            />
-          </div>
-
-          {/* 3. MULTI-MEDIA UPLOAD POD (Images + Videos, Max 3, Compulsory) */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider">
-                EVIDENCE MEDIA (PHOTOS / VIDEOS) <span className="text-red-500 font-black">*</span>
-              </label>
-              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
-                mediaItems.length > 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
-              }`}>
-                {mediaItems.length}/3 Uploaded {mediaItems.length === 0 ? '(Required)' : '✓'}
-              </span>
-            </div>
-
-            {/* Media Items Preview Grid */}
-            {mediaItems.length > 0 && (
-              <div className="grid grid-cols-3 gap-2.5">
-                {mediaItems.map((item, idx) => (
-                  <div 
-                    key={`media-${idx}-${item.name}`} 
-                    className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 shadow-xs group aspect-square flex items-center justify-center"
-                  >
-                    {item.type === 'video' ? (
-                      <div className="relative w-full h-full bg-slate-950 flex items-center justify-center">
-                        <video
-                          src={item.previewUrl}
-                          className="w-full h-full object-cover opacity-80"
-                          playsInline
-                          muted
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <div className="w-8 h-8 rounded-full bg-black/70 flex items-center justify-center text-white border border-white/30">
-                            <Film className="w-4 h-4 text-cyan-400" />
-                          </div>
-                        </div>
-                        <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded text-[8px] font-mono font-bold bg-black/80 text-cyan-300 border border-cyan-800 uppercase">
-                          VIDEO
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="relative w-full h-full">
-                        <img
-                          src={item.previewUrl}
-                          alt={`Evidence preview ${idx + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                        <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded text-[8px] font-mono font-bold bg-black/80 text-amber-300 border border-amber-800 uppercase">
-                          PHOTO
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Delete item button */}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveMedia(idx)}
-                      title="Remove this media"
-                      className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/80 hover:bg-red-600 text-white flex items-center justify-center text-[10px] transition-colors cursor-pointer shadow-md"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-
-                {/* Add More button if under 3 */}
-                {mediaItems.length < 3 && (
-                  <label className="border border-dashed border-[#dfd2be] bg-[#faf6ee]/70 hover:bg-[#faf6ee] rounded-2xl aspect-square flex flex-col items-center justify-center transition-colors cursor-pointer text-center group">
-                    <div className="w-7 h-7 rounded-full bg-white border border-[#e5d9c5] flex items-center justify-center mb-1 group-hover:scale-105 transition-transform shadow-2xs">
-                      <Plus className="w-3.5 h-3.5 text-slate-700" />
-                    </div>
-                    <span className="text-[10px] font-bold text-slate-700">Add More</span>
-                    <span className="text-[8px] font-mono text-slate-400">({3 - mediaItems.length} left)</span>
-                    <input
-                      type="file"
-                      accept="image/*,video/*"
-                      multiple
-                      onChange={handleFilesSelect}
-                      className="hidden"
-                    />
-                  </label>
-                )}
-              </div>
-            )}
-
-            {/* Initial Empty Upload Dropzone */}
-            {mediaItems.length === 0 && (
-              <label className="border-2 border-dashed border-[#dfd2be] bg-[#faf6ee]/60 hover:bg-[#faf6ee] rounded-2xl p-4 flex flex-col items-center justify-center transition-colors cursor-pointer text-center group">
-                <div className="flex items-center space-x-2 mb-1.5">
-                  <div className="w-8 h-8 rounded-full bg-white border border-[#e5d9c5] flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform text-slate-700">
-                    <ImageIcon className="w-4 h-4 text-blue-600" />
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-white border border-[#e5d9c5] flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform text-slate-700">
-                    <Video className="w-4 h-4 text-rose-600" />
+            {/* ----------------------------------------------------
+                STEP 5: EVIDENCE MEDIA (PHOTOS / VIDEOS)
+               ---------------------------------------------------- */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                    5
+                  </span>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      Field Evidence Media
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Upload live photos or video evidence for AI forensic verification
+                    </p>
                   </div>
                 </div>
-                <span className="text-xs font-bold text-slate-800">
-                  Click or Drag & Drop Photos or Videos
+
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                  Up to 3 files <span className="text-rose-500 font-bold">(Required)</span>
                 </span>
-                <span className="text-[10px] text-slate-500 mt-0.5 font-medium">
-                  Upload up to 3 medias (PNG, JPG, WebP, MP4, MOV up to 25MB each)
-                </span>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*,video/*"
-                  multiple
-                  required
-                  onChange={handleFilesSelect}
-                  className="hidden"
-                />
-              </label>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                {/* Main Dropzone */}
+                <label className={`sm:col-span-6 border-2 border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center transition-all cursor-pointer text-center group ${mediaItems.length >= 3 ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <div className="w-9 h-9 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900/60 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform text-blue-600 dark:text-blue-400 shadow-2xs">
+                    <CloudUpload className="w-4 h-4" />
+                  </div>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Drag & drop photos or videos here
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    or click to browse (PNG, JPG, MP4 up to 25MB)
+                  </span>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    disabled={mediaItems.length >= 3}
+                    onChange={handleFilesSelect}
+                    className="hidden"
+                  />
+                </label>
+
+                {/* Thumbnail Slots (3 Slots) */}
+                <div className="sm:col-span-6 grid grid-cols-3 gap-2">
+                  {[0, 1, 2].map((slotIdx) => {
+                    const item = mediaItems[slotIdx];
+                    if (item) {
+                      return (
+                        <div
+                          key={`slot-${slotIdx}-${item.name}`}
+                          className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-900 aspect-square flex items-center justify-center group shadow-2xs"
+                        >
+                          {item.type === 'video' ? (
+                            <div className="relative w-full h-full bg-slate-950 flex items-center justify-center">
+                              <video src={item.previewUrl} className="w-full h-full object-cover opacity-80" playsInline muted />
+                              <Film className="w-4 h-4 text-cyan-300 absolute" />
+                              <span className="absolute bottom-1.5 left-1.5 px-1 py-0.2 rounded text-[7.5px] font-mono font-bold bg-black/80 text-cyan-300">
+                                VID
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="relative w-full h-full">
+                              <img src={item.previewUrl} alt={`Evidence ${slotIdx + 1}`} className="w-full h-full object-cover" />
+                              <span className="absolute bottom-1.5 left-1.5 px-1 py-0.2 rounded text-[7.5px] font-mono font-bold bg-black/80 text-amber-300">
+                                IMG
+                              </span>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMedia(slotIdx)}
+                            className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/80 hover:bg-rose-600 text-white flex items-center justify-center text-[10px] transition-colors cursor-pointer shadow-md"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <label
+                          key={`empty-slot-${slotIdx}`}
+                          className="border border-dashed border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-2xl aspect-square flex items-center justify-center transition-all cursor-pointer text-slate-400 hover:text-slate-600 group"
+                        >
+                          <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                          <input
+                            type="file"
+                            accept="image/*,video/*"
+                            multiple
+                            onChange={handleFilesSelect}
+                            className="hidden"
+                          />
+                        </label>
+                      );
+                    }
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Error / AI Rejection Alert Message */}
+            {errorMsg && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/80 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-200 rounded-2xl text-xs font-medium flex items-center gap-2.5 animate-in fade-in">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+                <span>{errorMsg}</span>
+              </div>
             )}
-          </div>
 
-          {/* Error / Alert Message */}
-          {errorMsg && (
-            <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-medium flex items-center space-x-2 animate-in fade-in">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
-              <span>{errorMsg}</span>
+            {/* Upload progress notice */}
+            {submitting && uploadProgress && (
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 rounded-2xl text-xs font-mono flex items-center gap-2.5">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-cyan-400 shrink-0" />
+                <span>{uploadProgress}</span>
+              </div>
+            )}
+
+            {/* Footer Action Buttons */}
+            <div className="pt-3 flex items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800/80">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={submitting}
+                className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Cancel</span>
+              </button>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-500/20 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Verifying & Submitting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Submit Hazard Report</span>
+                  </>
+                )}
+              </button>
             </div>
-          )}
 
-          {/* Upload progress notice */}
-          {submitting && uploadProgress && (
-            <div className="p-2.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-xl text-xs font-mono flex items-center space-x-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
-              <span>{uploadProgress}</span>
-            </div>
-          )}
-
-          {/* Footer Action Buttons */}
-          <div className="flex items-center justify-end space-x-3 pt-2 shrink-0 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={submitting}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-6 py-2.5 rounded-xl bg-[#24424d] hover:bg-[#1a333c] text-white font-bold text-xs shadow-md hover:shadow-lg transition-all flex items-center space-x-2 cursor-pointer disabled:opacity-50"
-            >
-              {submitting ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Submitting...</span>
-                </>
-              ) : (
-                <span>Submit Report</span>
-              )}
-            </button>
-          </div>
-
-        </form>
+          </form>
+        </div>
 
       </div>
     </div>

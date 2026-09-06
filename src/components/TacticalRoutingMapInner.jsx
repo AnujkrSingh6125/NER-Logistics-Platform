@@ -401,12 +401,34 @@ export default function TacticalRoutingMapInner({
                   ORIGIN: {originHub.hub_code}
                 </div>
               </Tooltip>
-              <Popup>
-                <div className="bg-slate-950 text-slate-100 font-mono p-3 rounded-lg border border-slate-700 max-w-xs">
-                  <div className="text-[10px] text-cyan-400 font-bold uppercase">ORIGIN DISPATCH DEPOT</div>
-                  <h4 className="font-bold text-xs text-white">{originHub.hub_name}</h4>
-                  <div className="text-[11px] text-slate-300 mt-1">{originHub.district}, {originHub.state}</div>
-                  <div className="text-[10px] text-amber-300 mt-0.5">Capacity: {parseFloat(originHub.capacity_metric_tons).toLocaleString()} MT</div>
+              <Popup className="custom-hub-popup" minWidth={280} maxWidth={310}>
+                <div className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans text-xs rounded-2xl overflow-hidden shadow-2xl border border-slate-200/90 dark:border-slate-800">
+                  <div className="bg-[#0f172a] px-3.5 py-2 flex items-center justify-between text-white border-b border-slate-800">
+                    <span className="font-bold text-xs tracking-wider font-mono text-cyan-400">
+                      {originHub.hub_code || 'ORIGIN-HUB'}
+                    </span>
+                    <div className="flex items-center gap-1.5 pr-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]" />
+                      <span className="text-emerald-400 font-medium text-[10px]">
+                        Origin Dispatch
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-3 space-y-2.5">
+                    <div>
+                      <h4 className="font-bold text-xs text-slate-900 dark:text-white">{originHub.hub_name}</h4>
+                      <p className="text-slate-500 dark:text-slate-400 text-[11px] flex items-center gap-1 mt-0.5">
+                        <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span>{originHub.district}, {originHub.state}</span>
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl p-2 flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold">Capacity</span>
+                      <strong className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                        {originHub.capacity_metric_tons ? `${parseFloat(originHub.capacity_metric_tons).toLocaleString()} MT` : '2,500 MT'}
+                      </strong>
+                    </div>
+                  </div>
                 </div>
               </Popup>
             </CircleMarker>
@@ -429,12 +451,34 @@ export default function TacticalRoutingMapInner({
                   DESTINATION: {destHub.district}
                 </div>
               </Tooltip>
-              <Popup>
-                <div className="bg-slate-950 text-slate-100 font-mono p-3 rounded-lg border border-slate-700 max-w-xs">
-                  <div className="text-[10px] text-emerald-400 font-bold uppercase">TARGET RELIEF SECTOR</div>
-                  <h4 className="font-bold text-xs text-white">{destHub.hub_name}</h4>
-                  <div className="text-[11px] text-slate-300 mt-1">{destHub.district}, {destHub.state}</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">Contact: {destHub.contact_phone || 'Nodal Relief Desk'}</div>
+              <Popup className="custom-hub-popup" minWidth={280} maxWidth={310}>
+                <div className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans text-xs rounded-2xl overflow-hidden shadow-2xl border border-slate-200/90 dark:border-slate-800">
+                  <div className="bg-[#0f172a] px-3.5 py-2 flex items-center justify-between text-white border-b border-slate-800">
+                    <span className="font-bold text-xs tracking-wider font-mono text-emerald-400">
+                      {destHub.hub_code || 'TARGET-HUB'}
+                    </span>
+                    <div className="flex items-center gap-1.5 pr-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]" />
+                      <span className="text-emerald-400 font-medium text-[10px]">
+                        Target Sector
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-3 space-y-2.5">
+                    <div>
+                      <h4 className="font-bold text-xs text-slate-900 dark:text-white">{destHub.hub_name}</h4>
+                      <p className="text-slate-500 dark:text-slate-400 text-[11px] flex items-center gap-1 mt-0.5">
+                        <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span>{destHub.district}, {destHub.state}</span>
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl p-2 flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold">Contact</span>
+                      <strong className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                        {destHub.contact_phone || 'Nodal Relief Desk'}
+                      </strong>
+                    </div>
+                  </div>
                 </div>
               </Popup>
             </CircleMarker>

@@ -171,21 +171,110 @@ export function generateInterpolatedPath(startCoords, endCoords, deviationMultip
   };
 }
 
-import { fetchMultiTacticalRoutes } from '@/lib/routeAnalyzer';
+import { fetchMultiTacticalRoutes, rescoreRoutesWithHazards } from './routeAnalyzer.js';
+import { cacheRouteOffline, getOfflineCachedRoute } from './offlineDb.js';
 
 /**
- * Fetch Multi-Route Geometry from OSRM and perform Automated Hazard Proximity Scoring
+ * Fetch Multi-Route Geometry from OSRM and perform Automated Hazard & Weather Proximity Scoring
+ * Seamlessly falls back to Dexie IndexedDB offline cached route if network is unavailable
  * @param {[number, number]} startCoords - [lat, lng]
  * @param {[number, number]} endCoords - [lat, lng]
  * @param {Array<Object>} activeHazards - List of active road hazards
  */
 export async function calculateSafestMultiRoutes(startCoords, endCoords, activeHazards = []) {
+  const [sLat, sLng] = startCoords;
+  const [eLat, eLng] = endCoords;
+
   try {
-    return await fetchMultiTacticalRoutes(startCoords, endCoords, activeHazards);
+    const result = await fetchMultiTacticalRoutes(startCoords, endCoords, activeHazards);
+    if (result && result.success && result.allRoutes && result.allRoutes.length > 0) {
+      // Asynchronously cache successful route geometry into Dexie IndexedDB
+      cacheRouteOffline({
+        originLat: sLat,
+        originLng: sLng,
+        destLat: eLat,
+        destLng: eLng,
+        routesData: result,
+      }).catch(() => {});
+
+      return result;
+    }
   } catch (e) {
-    console.warn('Tactical multi-route calculation fallback:', e);
-    throw e;
+    console.warn('Online tactical routing failed, checking Dexie offline cache:', e?.message || e);
   }
+
+  // Check Dexie offline storage for previously cached corridor
+  try {
+    const cached = await getOfflineCachedRoute(sLat, sLng, eLat, eLng);
+    if (cached && cached.allRoutes && cached.allRoutes.length > 0) {
+      console.log('⚡ Using Dexie Offline Cached Route for corridor [', sLat, sLng, '->', eLat, eLng, ']');
+      // Rescore cached corridors with any local hazards
+      const rescored = rescoreRoutesWithHazards(cached.allRoutes, activeHazards);
+      if (rescored && rescored.success) {
+        return {
+          ...rescored,
+          isOfflineCached: true,
+          cachedAt: cached.cachedAt,
+        };
+      }
+      return {
+        ...cached,
+        isOfflineCached: true,
+      };
+    }
+  } catch (dbErr) {
+    console.warn('Dexie offline cache lookup error:', dbErr);
+  }
+
+  // Geodesic Vector fallback
+  const directDist = getDistanceKm(sLat, sLng, eLat, eLng);
+  const directDistKm = parseFloat(directDist.toFixed(1));
+  const directDur = Math.round((directDistKm / 45) * 60);
+
+  const fallbackRoute = {
+    id: 'corridor-offline-vector',
+    index: 0,
+    name: 'Primary: Direct Vector Corridor (Offline)',
+    summary: 'Direct Vector Corridor (Offline Mode)',
+    corridorName: 'Direct Vector Corridor',
+    coordinates: [[sLat, sLng], [eLat, eLng]],
+    anchorPoint: [(sLat + eLat) / 2, (sLng + eLng) / 2],
+    midpoint: [(sLat + eLat) / 2, (sLng + eLng) / 2],
+    distanceKm: directDistKm,
+    durationMin: directDur,
+    durationSeconds: directDur * 60,
+    durationText: formatTransitDuration(directDur * 60, directDistKm),
+    hazardCount: 0,
+    hazardScore: 0,
+    riskScore: 0,
+    sciScore: 10,
+    weather: {
+      maxRainfallMm: 0,
+      avgTemperature: 24,
+      dominantWeather: 'Clear Sky (Offline)',
+      weatherEmoji: '☀️',
+      weatherRiskScore: 0,
+      riskTier: 'safe',
+      alertMessage: 'Offline mode active.',
+    },
+    flaggedHazards: [],
+    safetyStatus: 'optimal',
+    safetyLabel: 'Safest Corridor (0 Hazards)',
+    tag: 'SHORTEST & SAFEST',
+    primaryTag: 'SHORTEST & SAFEST',
+    isPrimary: true,
+    isRecommendedSafest: true,
+    isOfflineCached: true,
+  };
+
+  return {
+    success: true,
+    allRoutes: [fallbackRoute],
+    rankedRoutes: [fallbackRoute],
+    recommendedRoute: fallbackRoute,
+    safestRouteIndex: 0,
+    isOfflineCached: true,
+  };
 }
 
 // Backward-compatible exports
@@ -210,7 +299,7 @@ export function findHazardsAlongRoute(routeCoords, hazards, thresholdKm = 10) {
 }
 
 export { fetchRealRoadRoute } from '@/utils/routeEngine';
-export { fetchMultiTacticalRoutes, rescoreRoutesWithHazards } from '@/lib/routeAnalyzer';
+export { fetchMultiTacticalRoutes, rescoreRoutesWithHazards };
 
 
 

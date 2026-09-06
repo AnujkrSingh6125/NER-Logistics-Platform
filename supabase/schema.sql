@@ -109,7 +109,8 @@ CREATE TABLE IF NOT EXISTS public.road_hazards (
             'road_washout',
             'tree_fall',
             'heavy_waterlogging',
-            'bridge_damage'
+            'bridge_damage',
+            'other'
         )
     ),
     severity TEXT NOT NULL DEFAULT 'medium' CHECK (
@@ -127,6 +128,11 @@ CREATE TABLE IF NOT EXISTS public.road_hazards (
     reported_by_contact TEXT,
     reported_by_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    ai_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    ai_confidence NUMERIC,
+    ai_hazard_type TEXT,
+    ai_verdict_summary TEXT,
+    ai_analysis_raw JSONB,
     impact_radius_km NUMERIC DEFAULT 5.0,
     latitude DOUBLE PRECISION NOT NULL,
     longitude DOUBLE PRECISION NOT NULL,
@@ -151,6 +157,11 @@ ALTER TABLE public.road_hazards
     ADD COLUMN IF NOT EXISTS reported_by_name TEXT,
     ADD COLUMN IF NOT EXISTS reported_by_contact TEXT,
     ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ai_verified BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ai_confidence NUMERIC,
+    ADD COLUMN IF NOT EXISTS ai_hazard_type TEXT,
+    ADD COLUMN IF NOT EXISTS ai_verdict_summary TEXT,
+    ADD COLUMN IF NOT EXISTS ai_analysis_raw JSONB,
     ADD COLUMN IF NOT EXISTS impact_radius_km NUMERIC DEFAULT 5.0,
     ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION,
     ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION,
@@ -357,6 +368,8 @@ CREATE INDEX IF NOT EXISTS idx_shipments_tracking_code
 -- ----------------------------------------------------------------------------
 
 -- 4.1 Function & Trigger: Automatic driver profile provisioning on auth.users signup
+DROP FUNCTION IF EXISTS public.handle_user_signup() CASCADE;
+
 CREATE OR REPLACE FUNCTION public.handle_user_signup()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -420,6 +433,8 @@ CREATE TRIGGER on_auth_user_created
     EXECUTE FUNCTION public.handle_user_signup();
 
 -- 4.2 Function: Auto-populate and sync Point geometry from latitude & longitude
+DROP FUNCTION IF EXISTS public.fn_sync_geometry_from_lat_long() CASCADE;
+
 CREATE OR REPLACE FUNCTION public.fn_sync_geometry_from_lat_long()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -449,6 +464,8 @@ CREATE TRIGGER trg_supply_hubs_spatial
     EXECUTE FUNCTION public.fn_sync_geometry_from_lat_long();
 
 -- 4.3 Function: Auto-populate shipment current_location from coordinates
+DROP FUNCTION IF EXISTS public.fn_sync_shipment_geometry() CASCADE;
+
 CREATE OR REPLACE FUNCTION public.fn_sync_shipment_geometry()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -481,6 +498,8 @@ CREATE TRIGGER trg_shipments_spatial
     EXECUTE FUNCTION public.fn_sync_shipment_geometry();
 
 -- 4.4 Function: Update timestamp helper
+DROP FUNCTION IF EXISTS public.fn_handle_updated_at() CASCADE;
+
 CREATE OR REPLACE FUNCTION public.fn_handle_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -539,6 +558,10 @@ END $$;
 -- ----------------------------------------------------------------------------
 
 -- Function: Find road hazards within a specific radius (in meters) of a coordinate
+DROP FUNCTION IF EXISTS public.get_hazards_within_radius(DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION) CASCADE;
+DROP FUNCTION IF EXISTS public.get_hazards_within_radius(DOUBLE PRECISION, DOUBLE PRECISION) CASCADE;
+DROP FUNCTION IF EXISTS public.get_hazards_within_radius CASCADE;
+
 CREATE OR REPLACE FUNCTION public.get_hazards_within_radius(
     center_lng DOUBLE PRECISION,
     center_lat DOUBLE PRECISION,
@@ -587,6 +610,10 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 -- Function: Find nearest supply hubs from a given point
+DROP FUNCTION IF EXISTS public.get_nearest_supply_hubs(DOUBLE PRECISION, DOUBLE PRECISION, INT) CASCADE;
+DROP FUNCTION IF EXISTS public.get_nearest_supply_hubs(DOUBLE PRECISION, DOUBLE PRECISION) CASCADE;
+DROP FUNCTION IF EXISTS public.get_nearest_supply_hubs CASCADE;
+
 CREATE OR REPLACE FUNCTION public.get_nearest_supply_hubs(
     target_lng DOUBLE PRECISION,
     target_lat DOUBLE PRECISION,
@@ -631,6 +658,8 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 -- Function: Cascade GDPR-compliant deletion of authenticated user account
+DROP FUNCTION IF EXISTS public.delete_user_account() CASCADE;
+
 CREATE OR REPLACE FUNCTION public.delete_user_account()
 RETURNS VOID
 LANGUAGE plpgsql

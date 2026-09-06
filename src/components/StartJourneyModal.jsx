@@ -12,19 +12,58 @@ import {
   X, 
   AlertCircle, 
   CheckCircle2, 
-  Navigation,
-  Radio
+  Radio,
+  FileText,
+  Mountain,
+  ShieldCheck,
+  BarChart3,
+  Car,
+  Loader2,
+  ArrowRight
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
-const CARGO_PRESETS = [
-  'Essential Medicines & First Aid',
-  'Food Grain Bags & Dry Rations',
-  'Emergency Shelter Kits & Tarpaulins',
-  'Purified Drinking Water Canisters',
-  'Thermal Blankets & Winter Clothing',
-  'Disaster Relief Equipment & Tools',
-  'High-Priority Medical Supplies'
+const CARGO_PRESET_ITEMS = [
+  { label: 'Essential Medicines & First Aid', icon: '💙' },
+  { label: 'Food Grain Bags & Dry Rations', icon: '🌾' },
+  { label: 'Emergency Shelter Kits & Tarpaulins', icon: '⛺' },
+  { label: 'Purified Drinking Water Canisters', icon: '💧' },
+  { label: 'Thermal Blankets & Winter Clothing', icon: '❄️' },
+  { label: 'Disaster Relief Equipment & Tools', icon: '🔧' },
+  { label: 'High-Priority Medical Supplies', icon: '➕' }
+];
+
+const DISPATCH_TEMPLATES = [
+  {
+    name: 'NDRF Medical & Cold Storage (10 MT)',
+    cargo: 'Essential Medicines & Cold Storage Vaccines',
+    weight: '10.0',
+    unit: 'MT'
+  },
+  {
+    name: 'Emergency Food Rations & Grains (15 MT)',
+    cargo: 'Food Grain Bags & Dry Rations',
+    weight: '15.0',
+    unit: 'MT'
+  },
+  {
+    name: 'Disaster Shelter Kits & Tarps (15 MT)',
+    cargo: 'Emergency Shelter Kits & Tarpaulins',
+    weight: '15.0',
+    unit: 'MT'
+  },
+  {
+    name: 'Purified Drinking Water Canisters (20 MT)',
+    cargo: 'Purified Drinking Water Canisters',
+    weight: '20.0',
+    unit: 'MT'
+  },
+  {
+    name: 'Winter Relief & Thermal Clothing (8 MT)',
+    cargo: 'Thermal Blankets & Winter Clothing',
+    weight: '8.0',
+    unit: 'MT'
+  }
 ];
 
 export default function StartJourneyModal({
@@ -48,6 +87,7 @@ export default function StartJourneyModal({
   const [selectedDestId, setSelectedDestId] = useState(destHubId || '');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
 
   // Sync initial props
   useEffect(() => {
@@ -55,16 +95,17 @@ export default function StartJourneyModal({
       if (originHubId) setSelectedOriginId(originHubId);
       if (destHubId) setSelectedDestId(destHubId);
       setErrorMsg('');
+      setShowTemplateMenu(false);
     }
   }, [isOpen, originHubId, destHubId]);
 
   if (!isOpen) return null;
 
   // Resolve Driver Details (Read-only Auto-populated)
-  const driverName = profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Field Operator';
-  const driverPhone = profile?.phone || user?.user_metadata?.phone || '+91-94350-00000';
-  const driverCode = profile?.driver_code || `DRV-NER-${user?.id ? user.id.slice(0, 4).toUpperCase() : '4921'}`;
-  const vehicleNumber = profile?.vehicle_number || user?.user_metadata?.vehicle_number || 'AS-01-AX-9921';
+  const driverName = profile?.full_name || user?.user_metadata?.full_name || (user?.email ? user.email.split('@')[0] : 'anuj');
+  const driverPhone = profile?.phone || user?.user_metadata?.phone || '+91 6294913005';
+  const driverCode = profile?.driver_code || `DRV-NER-${user?.id ? user.id.slice(0, 4).toUpperCase() : '9C88'}`;
+  const vehicleNumber = profile?.vehicle_number || user?.user_metadata?.vehicle_number || 'WB1995';
 
   // Handle Form Submission
   const handleSubmit = async (e) => {
@@ -266,246 +307,492 @@ export default function StartJourneyModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="relative w-full max-w-xl bg-[#070d19] border border-cyan-800/80 rounded-2xl shadow-2xl my-auto max-h-[92vh] flex flex-col text-slate-100 font-mono">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-3 sm:p-5 overflow-y-auto animate-in fade-in duration-200 font-sans">
+      <div className="relative w-full max-w-5xl bg-white dark:bg-[#0f172a] rounded-3xl shadow-2xl border border-slate-200/90 dark:border-slate-800 overflow-hidden flex flex-col md:flex-row my-auto max-h-[94vh]">
         
-        {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-cyan-950 bg-[#0b1426]/90 rounded-t-2xl">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-xl bg-cyan-950 border border-cyan-700/60 text-cyan-400">
-              <Truck className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h3 className="text-sm font-bold text-white tracking-wide">
-                  START TRANSIT JOURNEY
-                </h3>
-                <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-cyan-950 text-cyan-300 border border-cyan-700">
-                  DISPATCH MANIFEST
-                </span>
+        {/* =========================================================================
+            LEFT BRANDED SIDEBAR (Full-Bleed Convoy Image, Highlights, Tagline)
+           ========================================================================= */}
+        <div className="w-full md:w-[280px] lg:w-[320px] shrink-0 relative overflow-hidden flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-200/80 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 min-h-[360px] md:min-h-[580px]">
+          {/* Full-bleed background image covering 100% of the left panel */}
+          <img
+            src="/convoy.jpg"
+            alt="NER Logistics Convoy in Transit"
+            className="absolute inset-0 w-full h-full object-cover object-bottom"
+          />
+          
+          {/* Lighter, clear gradient overlay allowing the vivid convoy image to shine through with high opacity */}
+          <div className="absolute inset-0 bg-gradient-to-b from-slate-50/90 via-slate-50/30 via-30% to-black/75 dark:from-[#0b1220]/90 dark:via-[#0b1220]/30 dark:via-30% dark:to-black/80 pointer-events-none" />
+
+          {/* Top Section */}
+          <div className="relative z-10 p-5 sm:p-6 pb-2 space-y-4">
+            {/* Top Brand Header */}
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+                <Mountain className="w-5 h-5" />
               </div>
-              <p className="text-[11px] text-slate-400">
-                Log cargo consignment and activate live telemetry broadcast
+              <div>
+                <h2 className="text-base font-extrabold tracking-tight text-slate-900 dark:text-white leading-none">
+                  NER-LOGIX
+                </h2>
+                <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mt-0.5">
+                  Tactical Logistics
+                </p>
+              </div>
+            </div>
+
+            {/* Feature Highlights with Frosted Glass Protection */}
+            <div className="space-y-2.5 my-4">
+              {/* 1. Track in Real-Time */}
+              <div className="flex items-center gap-2.5 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md p-2 rounded-xl border border-white/80 dark:border-slate-700/60 shadow-2xs">
+                <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                    Track in Real-Time
+                  </h4>
+                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight font-medium">
+                    Live GPS telemetry
+                  </p>
+                </div>
+              </div>
+
+              {/* 2. Safer Convoys */}
+              <div className="flex items-center gap-2.5 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md p-2 rounded-xl border border-white/80 dark:border-slate-700/60 shadow-2xs">
+                <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200/80 dark:border-blue-800/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                  <Radio className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                    Safer Convoys
+                  </h4>
+                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight font-medium">
+                    Faster emergency response
+                  </p>
+                </div>
+              </div>
+
+              {/* 3. Reliable Logistics */}
+              <div className="flex items-center gap-2.5 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md p-2 rounded-xl border border-white/80 dark:border-slate-700/60 shadow-2xs">
+                <div className="w-7 h-7 rounded-lg bg-purple-50 dark:bg-purple-950/50 border border-purple-200/80 dark:border-purple-800/60 flex items-center justify-center text-purple-600 dark:text-purple-400 shrink-0">
+                  <BarChart3 className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                    Reliable Logistics
+                  </h4>
+                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight font-medium">
+                    Data driven operations
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Inspirational Quote */}
+            <div className="pt-1">
+              <p className="text-sm font-bold italic text-slate-800 dark:text-slate-100 font-serif drop-shadow-xs">
+                &ldquo;Secure Routes, Stronger Northeast&rdquo;
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          {/* Bottom Tagline Overlaid over the Convoy Highway */}
+          <div className="relative z-10 p-5 sm:p-6 pt-12">
+            <div className="pt-3 border-t border-white/30 dark:border-white/20">
+              <p className="text-[11.5px] text-white font-bold drop-shadow-md">
+                Every dispatch makes a safer tomorrow.
+              </p>
+            </div>
+          </div>
         </div>
 
-        {/* Modal Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto max-h-[calc(92vh-130px)]">
+        {/* =========================================================================
+            RIGHT MAIN FORM (4-Step Dispatch Manifest)
+           ========================================================================= */}
+        <div className="flex-1 bg-white dark:bg-[#0f172a] flex flex-col overflow-hidden">
           
-          {errorMsg && (
-            <div className="p-3 bg-rose-950/80 border border-rose-800 rounded-xl text-xs text-rose-200 flex items-center space-x-2 animate-in fade-in">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
-
-          {/* Section 1: Auto-Populated Driver Profile (Read-Only) */}
-          <div className="p-3.5 bg-[#050a14] rounded-xl border border-slate-800 space-y-2.5">
-            <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              <span className="flex items-center space-x-1.5 text-cyan-400">
-                <Shield className="w-3.5 h-3.5" />
-                <span>OPERATOR CREDENTIALS (VERIFIED)</span>
-              </span>
-              <span className="text-emerald-400 flex items-center space-x-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                <span>ACTIVE DUTY</span>
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-              <div className="bg-[#081020] p-2 rounded-lg border border-slate-800">
-                <span className="block text-[9px] text-slate-500 font-bold uppercase">DRIVER NAME</span>
-                <span className="text-slate-200 font-bold truncate block">{driverName}</span>
+          {/* Header */}
+          <div className="p-5 sm:p-6 pb-4 flex items-start justify-between border-b border-slate-100 dark:border-slate-800/80">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-500/20">
+                <Truck className="w-5 h-5" />
               </div>
-              <div className="bg-[#081020] p-2 rounded-lg border border-slate-800">
-                <span className="block text-[9px] text-slate-500 font-bold uppercase">TACTICAL ID</span>
-                <span className="text-cyan-400 font-bold truncate block">{driverCode}</span>
-              </div>
-              <div className="bg-[#081020] p-2 rounded-lg border border-slate-800">
-                <span className="block text-[9px] text-slate-500 font-bold uppercase">PHONE</span>
-                <span className="text-slate-300 truncate block">{driverPhone}</span>
-              </div>
-              <div className="bg-[#081020] p-2 rounded-lg border border-slate-800">
-                <span className="block text-[9px] text-slate-500 font-bold uppercase">VEHICLE REG</span>
-                <span className="text-cyan-300 font-bold truncate block">{vehicleNumber}</span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
+                    Start Transit Journey
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800/60">
+                    DISPATCH MANIFEST
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                  Log cargo consignment and activate live telemetry broadcast
+                </p>
               </div>
             </div>
-          </div>
 
-          {/* Section 2: Mandatory Cargo Description */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-              GOODS / CARGO DESCRIPTION <span className="text-rose-500">*</span>
-            </label>
-            <div className="bg-[#050a14] border border-slate-800 focus-within:border-cyan-500 rounded-xl px-3.5 py-2.5 flex items-center space-x-2.5 transition-colors">
-              <Package className="w-4 h-4 text-cyan-400 shrink-0" />
-              <input
-                type="text"
-                required
-                value={cargoType}
-                onChange={(e) => setCargoType(e.target.value)}
-                placeholder="e.g. Essential Medicines & Cold Storage Vaccines"
-                className="bg-transparent text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none w-full"
-              />
-            </div>
-
-            {/* Quick Preset Badges */}
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {CARGO_PRESETS.map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => setCargoType(preset)}
-                  className={`px-2 py-1 rounded-md text-[10px] transition-colors border ${
-                    cargoType === preset
-                      ? 'bg-cyan-950 text-cyan-300 border-cyan-600'
-                      : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
-                  }`}
-                >
-                  + {preset}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Section 3: Goods Weight / Quantity */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-              CARGO WEIGHT / QUANTITY <span className="text-rose-500">*</span>
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="col-span-2 bg-[#050a14] border border-slate-800 focus-within:border-cyan-500 rounded-xl px-3.5 py-2.5 flex items-center space-x-2.5 transition-colors">
-                <Scale className="w-4 h-4 text-cyan-400 shrink-0" />
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.1"
-                  required
-                  value={cargoWeightVal}
-                  onChange={(e) => setCargoWeightVal(e.target.value)}
-                  placeholder="e.g. 15.0"
-                  className="bg-transparent text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none w-full font-bold"
-                />
-              </div>
-
-              {/* Unit Selector */}
-              <div className="flex rounded-xl bg-[#050a14] border border-slate-800 p-1">
-                <button
-                  type="button"
-                  onClick={() => setCargoWeightUnit('MT')}
-                  className={`flex-1 rounded-lg text-xs font-bold transition-colors ${
-                    cargoWeightUnit === 'MT'
-                      ? 'bg-cyan-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  MT (Tons)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCargoWeightUnit('Kg')}
-                  className={`flex-1 rounded-lg text-xs font-bold transition-colors ${
-                    cargoWeightUnit === 'Kg'
-                      ? 'bg-cyan-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Kg
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 4: Origin & Destination Facility Selectors */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-            
-            {/* Origin Hub */}
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1">
-                <MapPin className="w-3.5 h-3.5 text-emerald-400" />
-                <span>ORIGIN FACILITY <span className="text-rose-500">*</span></span>
-              </label>
-              <select
-                value={selectedOriginId}
-                onChange={(e) => setSelectedOriginId(e.target.value)}
-                className="w-full bg-[#050a14] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 cursor-pointer"
-              >
-                <option value="CURRENT_LOCATION">📍 My Current Location (Live GPS)</option>
-                {hubs.map((hub) => (
-                  <option key={`orig-${hub.id || hub.hub_code}`} value={hub.id || hub.hub_code}>
-                    {hub.hub_name} ({hub.hub_code}) - {hub.state}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Destination Hub */}
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1">
-                <Navigation className="w-3.5 h-3.5 text-rose-400" />
-                <span>DESTINATION HUB <span className="text-rose-500">*</span></span>
-              </label>
-              <select
-                value={selectedDestId}
-                onChange={(e) => setSelectedDestId(e.target.value)}
-                className="w-full bg-[#050a14] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 cursor-pointer"
-              >
-                <option value="">-- Select Destination Facility --</option>
-                {hubs.map((hub) => (
-                  <option key={`dest-${hub.id || hub.hub_code}`} value={hub.id || hub.hub_code}>
-                    {hub.hub_name} ({hub.hub_code}) - {hub.state}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Telemetry Notice */}
-          <div className="p-3 bg-cyan-950/40 border border-cyan-800/50 rounded-xl text-[11px] text-cyan-300 flex items-start space-x-2.5">
-            <Radio className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5 animate-pulse" />
-            <p className="leading-relaxed">
-              Upon dispatch, live hardware GPS streaming will automatically broadcast your convoy position to Nodal Emergency Centers.
-            </p>
-          </div>
-
-          {/* Footer Actions */}
-          <div className="pt-2 flex items-center justify-end space-x-3 border-t border-slate-800/80">
             <button
-              type="button"
               onClick={onClose}
-              disabled={submitting}
-              className="px-4 py-2.5 rounded-xl border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 text-xs font-bold uppercase transition-colors cursor-pointer"
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              aria-label="Close modal"
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold uppercase tracking-wider shadow-lg shadow-emerald-900/40 flex items-center space-x-2 transition-all cursor-pointer disabled:opacity-50"
-            >
-              {submitting ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>DISPATCHING CONVOY...</span>
-                </>
-              ) : (
-                <>
-                  <Truck className="w-4 h-4" />
-                  <span>CONFIRM DISPATCH & BEGIN JOURNEY</span>
-                </>
-              )}
+              <X className="w-5 h-5" />
             </button>
           </div>
 
-        </form>
+          {/* Form Content */}
+          <form onSubmit={handleSubmit} className="p-5 sm:p-6 overflow-y-auto space-y-5 max-h-[calc(94vh-140px)]">
+            
+            {errorMsg && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/80 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-200 flex items-center gap-2 animate-in fade-in">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {/* ----------------------------------------------------
+                STEP 1: OPERATOR DETAILS
+               ---------------------------------------------------- */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                    1
+                  </span>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      Operator Details
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Verify operator credentials before dispatch
+                    </p>
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800/60">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Verified • Active Duty</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl p-2.5">
+                  <span className="block text-[10px] font-semibold text-slate-400 dark:text-slate-400 mb-1">Driver Name</span>
+                  <div className="flex items-center gap-1.5 text-slate-800 dark:text-slate-100 text-xs font-bold">
+                    <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">{driverName}</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl p-2.5">
+                  <span className="block text-[10px] font-semibold text-slate-400 dark:text-slate-400 mb-1">Tactical ID</span>
+                  <div className="flex items-center gap-1.5 text-slate-800 dark:text-slate-100 text-xs font-bold font-mono">
+                    <Shield className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">{driverCode}</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl p-2.5">
+                  <span className="block text-[10px] font-semibold text-slate-400 dark:text-slate-400 mb-1">Phone Number</span>
+                  <div className="flex items-center gap-1.5 text-slate-800 dark:text-slate-100 text-xs font-bold">
+                    <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">{driverPhone}</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl p-2.5">
+                  <span className="block text-[10px] font-semibold text-slate-400 dark:text-slate-400 mb-1">Vehicle Registration</span>
+                  <div className="flex items-center gap-1.5 text-slate-800 dark:text-slate-100 text-xs font-bold font-mono">
+                    <Car className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">{vehicleNumber}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ----------------------------------------------------
+                STEP 2: CARGO INFORMATION
+               ---------------------------------------------------- */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                    2
+                  </span>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                      Cargo Information
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Provide details about the goods being transported
+                    </p>
+                  </div>
+                </div>
+
+                {/* Load from Template Popover Trigger */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowTemplateMenu(!showTemplateMenu)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-all cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Load from Template</span>
+                  </button>
+
+                  {showTemplateMenu && (
+                    <div className="absolute right-0 top-full mt-1.5 w-64 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl z-20 py-1.5 animate-in fade-in zoom-in-95">
+                      <div className="px-3 py-1.5 border-b border-slate-100 dark:border-slate-700/60 text-[10px] font-bold uppercase text-slate-400">
+                        Select Standard Relief Template
+                      </div>
+                      {DISPATCH_TEMPLATES.map((tmpl) => (
+                        <button
+                          key={tmpl.name}
+                          type="button"
+                          onClick={() => {
+                            setCargoType(tmpl.cargo);
+                            setCargoWeightVal(tmpl.weight);
+                            setCargoWeightUnit(tmpl.unit);
+                            setShowTemplateMenu(false);
+                          }}
+                          className="w-full text-left px-3.5 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors"
+                        >
+                          <span className="font-bold block text-slate-900 dark:text-white">{tmpl.name}</span>
+                          <span className="text-[10px] text-slate-400 truncate block mt-0.5">{tmpl.cargo}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Goods / Cargo Description <span className="text-rose-500">*</span>
+                </label>
+                <div className="bg-white dark:bg-slate-800/80 border border-slate-200/90 dark:border-slate-700 rounded-2xl px-3.5 py-2.5 flex items-center gap-2.5 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+                  <Package className="w-4 h-4 text-slate-400 shrink-0" />
+                  <input
+                    type="text"
+                    required
+                    value={cargoType}
+                    onChange={(e) => setCargoType(e.target.value)}
+                    placeholder="e.g. Essential Medicines & Cold Storage Vaccines"
+                    className="bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none w-full font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* Preset Pill Badges */}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {CARGO_PRESET_ITEMS.map((item) => {
+                  const isSelected = cargoType === item.label;
+                  return (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => setCargoType(item.label)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer border ${
+                        isSelected
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                          : 'bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-slate-700/70 hover:bg-slate-100 dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      <span className="text-xs">{item.icon}</span>
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ----------------------------------------------------
+                STEP 3: QUANTITY / WEIGHT
+               ---------------------------------------------------- */}
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2.5">
+                <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                  3
+                </span>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                    Quantity / Weight
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Specify total cargo weight or quantity
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2.5">
+                <div className="bg-white dark:bg-slate-800/80 border border-slate-200/90 dark:border-slate-700 rounded-2xl px-3.5 py-2 flex items-center gap-2.5 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+                  <div className="p-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
+                    <Scale className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1">
+                    <span className="block text-[9.5px] font-semibold text-slate-400 dark:text-slate-400">
+                      Weight / Quantity <span className="text-rose-500">*</span>
+                    </span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      required
+                      value={cargoWeightVal}
+                      onChange={(e) => setCargoWeightVal(e.target.value)}
+                      placeholder="15.0"
+                      className="bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none w-full font-bold"
+                    />
+                  </div>
+                </div>
+
+                {/* Unit Selector Toggle */}
+                <div className="flex rounded-2xl bg-slate-100 dark:bg-slate-800 p-1 border border-slate-200/80 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setCargoWeightUnit('MT')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      cargoWeightUnit === 'MT'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    MT (Tons)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCargoWeightUnit('Kg')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      cargoWeightUnit === 'Kg'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    Kg
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* ----------------------------------------------------
+                STEP 4: ROUTE DETAILS
+               ---------------------------------------------------- */}
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2.5">
+                <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                  4
+                </span>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                    Route Details
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Select origin and destination facilities
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Origin Facility */}
+                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 rounded-2xl p-2.5 flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 shrink-0">
+                    <MapPin className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="block text-[9.5px] font-semibold text-slate-400 dark:text-slate-400">
+                      Origin Facility <span className="text-rose-500">*</span>
+                    </span>
+                    <select
+                      value={selectedOriginId}
+                      onChange={(e) => setSelectedOriginId(e.target.value)}
+                      className="w-full bg-transparent text-xs text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer truncate"
+                    >
+                      <option value="CURRENT_LOCATION" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+                        My Current Location (Live GPS)
+                      </option>
+                      {hubs.map((hub) => (
+                        <option key={`orig-${hub.id || hub.hub_code}`} value={hub.id || hub.hub_code} className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+                          {hub.hub_name} ({hub.hub_code}) - {hub.state}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Destination Hub */}
+                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 rounded-2xl p-2.5 flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
+                    <MapPin className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="block text-[9.5px] font-semibold text-slate-400 dark:text-slate-400">
+                      Destination Hub <span className="text-rose-500">*</span>
+                    </span>
+                    <select
+                      value={selectedDestId}
+                      onChange={(e) => setSelectedDestId(e.target.value)}
+                      className="w-full bg-transparent text-xs text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer truncate"
+                    >
+                      <option value="" className="bg-white dark:bg-slate-800 text-slate-500">
+                        -- Select Destination Facility --
+                      </option>
+                      {hubs.map((hub) => (
+                        <option key={`dest-${hub.id || hub.hub_code}`} value={hub.id || hub.hub_code} className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+                          {hub.hub_name} ({hub.hub_code}) - {hub.state}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Live Telemetry Notice */}
+            <div className="p-3.5 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-900/40 rounded-2xl flex items-center gap-3 text-xs text-blue-900 dark:text-blue-200">
+              <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+                <Radio className="w-4 h-4 animate-pulse" />
+              </div>
+              <p className="text-[11.5px] leading-relaxed font-medium">
+                Live telemetry will be automatically activated upon dispatch, sharing your convoy position with Nodal Emergency Centers.
+              </p>
+            </div>
+
+            {/* Footer Action Buttons */}
+            <div className="pt-3 flex items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800/80">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={submitting}
+                className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Cancel</span>
+              </button>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Dispatching Convoy...</span>
+                  </>
+                ) : (
+                  <>
+                    <Truck className="w-4 h-4" />
+                    <span>Confirm Dispatch & Begin Journey</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+            </div>
+
+          </form>
+        </div>
+
       </div>
     </div>
   );

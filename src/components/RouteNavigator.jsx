@@ -302,13 +302,44 @@ export default function RouteNavigator({
             <span className="text-blue-600 dark:text-cyan-400 text-[9px] font-normal">Click to switch</span>
           </div>
 
+          {/* Dynamic Detour Auto-Promotion Alert Banner */}
+          {(() => {
+            const recommendedDetourIdx = routes.findIndex((r) => r.isRecommendedDetour);
+            if (recommendedDetourIdx >= 0 && activeRouteIndex !== recommendedDetourIdx) {
+              const detourRoute = routes[recommendedDetourIdx];
+              return (
+                <div className="p-2.5 rounded-2xl bg-amber-500/10 dark:bg-amber-950/40 border border-amber-500/40 text-amber-800 dark:text-amber-200 text-xs font-sans space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200 shadow-xs">
+                  <div className="flex items-center justify-between font-bold">
+                    <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-mono uppercase text-[10px]">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 animate-bounce" />
+                      <span>RECOMMENDED DETOUR ACTIVE</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onSelectRouteIndex && onSelectRouteIndex(recommendedDetourIdx)}
+                      className="px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-white font-mono font-bold text-[9px] uppercase rounded-lg shadow-xs cursor-pointer transition-all"
+                    >
+                      SWITCH DETOUR
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-amber-900 dark:text-amber-200 leading-tight">
+                    {detourRoute.detourPromotionReason || 'Primary highway corridor is compromised. Switch to this safe alternative bypass.'}
+                  </p>
+                </div>
+              );
+            }
+            return null;
+          })()}
+
           <div className="space-y-2">
             {routes.map((route, idx) => {
               const isSelected = idx === activeRouteIndex;
               const tag = route.tag || route.primaryTag || 'ALTERNATIVE';
               const isShortest = tag.includes('SHORTEST');
               const hazardCount = route.hazardCount ?? (route.flaggedHazards?.length || 0);
-              const hasThreat = hazardCount > 0;
+              const hasThreat = hazardCount > 0 || (route.sciScore && route.sciScore >= 40);
+              const sci = route.sciScore ?? (hasThreat ? 65 : 12);
+              const weather = route.weather;
 
               return (
                 <div
@@ -336,18 +367,45 @@ export default function RouteNavigator({
                       </span>
                     </div>
 
-                    <span className={`px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase tracking-wider shrink-0 ${
-                      hasThreat
-                        ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/40'
-                        : isShortest 
-                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40' 
-                          : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                    }`}>
-                      [{tag}]
-                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {route.isOfflineCached && (
+                        <span className="px-1 py-0.2 rounded text-[7px] font-mono font-bold uppercase bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
+                          OFFLINE
+                        </span>
+                      )}
+                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase tracking-wider shrink-0 ${
+                        route.isRecommendedDetour
+                          ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/50 animate-pulse'
+                          : hasThreat
+                            ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/40'
+                            : isShortest 
+                              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40' 
+                              : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                      }`}>
+                        [{tag}]
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="flex justify-between items-center text-[10px] text-slate-500 dark:text-slate-400 mt-1.5 pt-1 border-t border-slate-200/50 dark:border-slate-800/60">
+                  {/* Weather Snapshot Bar */}
+                  {weather && (
+                    <div className="flex items-center justify-between text-[9px] text-slate-600 dark:text-slate-400 py-0.5 px-1 rounded bg-slate-100/70 dark:bg-slate-900/70 mb-1 font-sans">
+                      <span className="flex items-center gap-1 truncate">
+                        <span>{weather.weatherEmoji || '⛅'}</span>
+                        <span className="truncate">{weather.dominantWeather || 'Moderate Weather'}</span>
+                        {weather.maxRainfallMm > 0 && (
+                          <span className="font-bold text-blue-600 dark:text-cyan-400">
+                            ({weather.maxRainfallMm} mm/h)
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-mono text-slate-500 dark:text-slate-400 shrink-0">
+                        {weather.avgTemperature}°C
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between items-center text-[10px] text-slate-500 dark:text-slate-400 mt-1 pt-1 border-t border-slate-200/50 dark:border-slate-800/60">
                     <div className="flex items-center gap-2 font-mono">
                       <span><b className="text-slate-800 dark:text-slate-200">{route.distanceKm} km</b></span>
                       <span>•</span>
@@ -356,11 +414,23 @@ export default function RouteNavigator({
                         {route.durationText || `${route.durationMin || 1} min`}
                       </span>
                     </div>
-                    <span>
-                      <b className={hazardCount === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
-                        {hazardCount === 0 ? '🟢 0 Threats' : `⚠️ ${hazardCount} Threat(s)`}
-                      </b>
-                    </span>
+
+                    <div className="flex items-center gap-1.5 font-mono">
+                      <span className={`px-1 py-0.2 rounded text-[8px] font-extrabold uppercase border ${
+                        sci < 25 
+                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30' 
+                          : sci < 50 
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30' 
+                            : 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30'
+                      }`}>
+                        SCI: {sci}
+                      </span>
+                      <span>
+                        <b className={hazardCount === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                          {hazardCount === 0 ? '🟢 Clear' : `⚠️ ${hazardCount}`}
+                        </b>
+                      </span>
+                    </div>
                   </div>
                 </div>
               );
