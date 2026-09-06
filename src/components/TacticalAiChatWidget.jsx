@@ -100,6 +100,7 @@ export default function TacticalAiChatWidget({
   const [messages, setMessages] = useState([welcomeMessage]);
   const [inputQuery, setInputQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [attachedImage, setAttachedImage] = useState(null); // { data, mimeType, previewUrl, name }
 
   // Extract resolved coordinates
   const resolvedCoords = useMemo(() => {
@@ -150,6 +151,37 @@ export default function TacticalAiChatWidget({
     };
   }, []);
 
+  // Handle image attachment selection
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file (JPG, PNG, WebP).');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size exceeds 5MB limit.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result;
+      if (base64) {
+        setAttachedImage({
+          data: base64,
+          mimeType: file.type,
+          previewUrl: base64,
+          name: file.name,
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   // Text-To-Speech
   const speakText = (text, msgId) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
@@ -195,25 +227,32 @@ export default function TacticalAiChatWidget({
   // Send message to Gemini route
   const handleSendMessage = async (queryToSend) => {
     const text = (queryToSend || inputQuery).trim();
-    if (!text || loading) return;
+    if ((!text && !attachedImage) || loading) return;
 
+    const currentImg = attachedImage;
     const userMsgId = `user-${Date.now()}`;
     const userMsg = {
       id: userMsgId,
       role: 'user',
-      content: text,
+      content: text || (currentImg ? 'Uploaded photo for tactical inspection.' : ''),
+      imagePreview: currentImg ? currentImg.previewUrl : null,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
     setMessages((prev) => [...prev, userMsg]);
     setInputQuery('');
+    setAttachedImage(null);
     setLoading(true);
 
     try {
       const userRole = isNodalOfficer ? 'nodal_officer' : (profile?.role || 'citizen_driver');
       const payload = {
         messages: [...messages, userMsg],
-        userQuery: text,
+        userQuery: text || 'Inspect this attached road situation photo and provide tactical advisory.',
+        imageAttachment: currentImg ? {
+          data: currentImg.data,
+          mimeType: currentImg.mimeType,
+        } : null,
         context: {
           hazards: hazards || [],
           hubs: hubs || [],
@@ -633,6 +672,17 @@ export default function TacticalAiChatWidget({
                     : 'bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-xs max-w-[92%]'
                 }`}
               >
+                {/* User Attached Image Preview */}
+                {isUser && msg.imagePreview && (
+                  <div className="mb-2 rounded-xl overflow-hidden border border-white/20 max-w-[200px]">
+                    <img 
+                      src={msg.imagePreview} 
+                      alt="Attached evidence" 
+                      className="w-full h-auto max-h-36 object-cover" 
+                    />
+                  </div>
+                )}
+
                 {renderFormattedMessage(msg.content)}
 
                 {/* Spoken Audio Controls */}
@@ -671,6 +721,31 @@ export default function TacticalAiChatWidget({
 
       {/* Input Box Footer */}
       <div className="p-3 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 select-none">
+        
+        {/* Attached Image Preview Bar */}
+        {attachedImage && (
+          <div className="mb-2 p-1.5 px-2 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between animate-in fade-in">
+            <div className="flex items-center space-x-2 truncate">
+              <img 
+                src={attachedImage.previewUrl} 
+                alt="Upload preview" 
+                className="w-8 h-8 rounded-lg object-cover border border-slate-300 dark:border-slate-600 shrink-0" 
+              />
+              <span className="text-[11px] font-mono text-slate-700 dark:text-slate-200 truncate">
+                {attachedImage.name || 'photo.jpg'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAttachedImage(null)}
+              className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+              title="Remove attachment"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 p-2.5 shadow-2xs focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/10 transition-all">
           
           <textarea
@@ -695,14 +770,15 @@ export default function TacticalAiChatWidget({
               <input 
                 type="file" 
                 ref={fileInputRef} 
+                accept="image/*"
                 className="hidden" 
-                onChange={() => alert('Photo evidence will be attached to next query')} 
+                onChange={handleFileSelect} 
               />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
-                title="Attach File"
+                title="Attach Photo"
               >
                 <Paperclip className="w-3.5 h-3.5" />
               </button>
@@ -740,7 +816,7 @@ export default function TacticalAiChatWidget({
             <button
               type="button"
               onClick={() => handleSendMessage()}
-              disabled={!inputQuery.trim() || loading || isRecording}
+              disabled={(!inputQuery.trim() && !attachedImage) || loading || isRecording}
               className="w-7 h-7 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white flex items-center justify-center shadow-xs transition-all cursor-pointer disabled:opacity-40 disabled:pointer-events-none"
               title="Send Message"
             >

@@ -143,9 +143,10 @@ CORE CAPABILITIES & GUIDELINES:
 Keep your response fast, crisp, helpful, and focused on logistics safety in the challenging terrain of Northeast India.
 `;
 
-    // Candidate model cascade for ultra-low latency (<1s response time)
+    // Candidate model cascade for ultra-low latency & reliability
     const candidateModels = [
       'gemini-3.5-flash-lite',
+      'gemini-3.6-flash',
       'gemini-3.1-flash-lite',
       'gemini-flash-lite-latest',
       'gemini-3.8-flash',
@@ -154,25 +155,53 @@ Keep your response fast, crisp, helpful, and focused on logistics safety in the 
     let replyText = null;
     let lastError = null;
 
-    // Format chat history into contents array
+    // Build parts for latest user turn (including optional image attachment)
+    const latestUserParts = [];
+    const imageAttachment = body.imageAttachment || null;
+
+    if (imageAttachment && imageAttachment.data && imageAttachment.mimeType) {
+      latestUserParts.push({
+        inlineData: {
+          data: imageAttachment.data.replace(/^data:[^;]+;base64,/, ''),
+          mimeType: imageAttachment.mimeType.split(';')[0].trim() || 'image/jpeg',
+        },
+      });
+    }
+
+    latestUserParts.push({ text: queryText });
+
+    // Format chat history into strictly valid alternating contents array
     const contents = [];
-    
-    // Append previous dialogue turns if available
-    const historySlice = messages.slice(-6);
+    const historySlice = messages.slice(-8);
+
     for (const msg of historySlice) {
-      if (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'model') {
+      // Exclude the current message from history if already present
+      if (msg.content === queryText && msg === historySlice[historySlice.length - 1]) {
+        continue;
+      }
+
+      const role = (msg.role === 'assistant' || msg.role === 'model') ? 'model' : 'user';
+      const cleanContent = (msg.content || msg.text || '').replace(/\[action:[^\]]+\]/g, '').trim();
+      if (!cleanContent) continue;
+
+      // Ensure no consecutive identical roles
+      if (contents.length > 0 && contents[contents.length - 1].role === role) {
+        contents[contents.length - 1].parts[0].text += `\n${cleanContent}`;
+      } else {
         contents.push({
-          role: msg.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: msg.content || msg.text || '' }]
+          role,
+          parts: [{ text: cleanContent }]
         });
       }
     }
 
-    // Ensure the latest user query is present
-    if (contents.length === 0 || contents[contents.length - 1].role !== 'user') {
+    // Append the latest user query with optional image
+    if (contents.length > 0 && contents[contents.length - 1].role === 'user') {
+      contents[contents.length - 1].parts = latestUserParts;
+    } else {
       contents.push({
         role: 'user',
-        parts: [{ text: queryText }]
+        parts: latestUserParts,
       });
     }
 
@@ -184,7 +213,7 @@ Keep your response fast, crisp, helpful, and focused on logistics safety in the 
           contents,
           config: {
             systemInstruction,
-            maxOutputTokens: 600,
+            maxOutputTokens: 800,
             temperature: 0.3,
           }
         });
