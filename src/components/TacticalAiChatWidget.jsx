@@ -846,19 +846,19 @@ export default function TacticalAiChatWidget({
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-5 right-5 z-[99999] group w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white flex items-center justify-center shadow-2xl shadow-blue-500/40 border border-white/25 hover:scale-105 active:scale-95 transition-all duration-300 cursor-pointer animate-in fade-in zoom-in-90"
+          className="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-[99999] group w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white flex items-center justify-center shadow-2xl shadow-blue-500/40 border border-white/25 hover:scale-105 active:scale-95 transition-all duration-300 cursor-pointer animate-in fade-in zoom-in-90"
           title="Open AshtaMarg AI Copilot"
         >
           <div className="relative flex items-center justify-center">
-            <Bot className="w-7 h-7 text-white animate-pulse" />
+            <Bot className="w-6 h-6 sm:w-7 sm:h-7 text-white animate-pulse" />
             <span className="w-3.5 h-3.5 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-slate-900 animate-ping absolute -top-2 -right-2" />
           </div>
         </button>
       )}
 
-      {/* 2. CHATTING INTERFACE WINDOW (STANDARD BOTTOM-RIGHT DRAWER) */}
+      {/* 2. CHATTING INTERFACE WINDOW (STANDARD DRAWER ON DESKTOP, EXPANDED ON MOBILE) */}
       {isOpen && !isFullscreen && (
-        <div className="fixed bottom-4 sm:bottom-6 right-3 sm:right-6 z-[99999] w-[94vw] sm:w-[390px] md:w-[410px] h-[540px] max-h-[calc(100vh-5.5rem)] bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl shadow-2xl shadow-blue-500/20 backdrop-blur-xl overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-5 zoom-in-95 duration-200">
+        <div className="fixed inset-x-3 bottom-20 top-4 sm:inset-auto sm:bottom-6 sm:right-6 sm:w-[390px] md:w-[410px] sm:h-[540px] sm:max-h-[calc(100vh-5.5rem)] z-[99999] bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl shadow-2xl shadow-blue-500/20 backdrop-blur-xl overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-5 zoom-in-95 duration-200">
           {renderChatContent()}
         </div>
       )}

@@ -308,13 +308,13 @@ export default function StartJourneyModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-3 sm:p-5 overflow-y-auto animate-in fade-in duration-200 font-sans">
-      <div className="relative w-full max-w-5xl bg-white dark:bg-[#0f172a] rounded-3xl shadow-2xl border border-slate-200/90 dark:border-slate-800 overflow-hidden flex flex-col md:flex-row my-auto max-h-[94vh]">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-5 overflow-y-auto animate-in fade-in duration-200 font-sans">
+      <div className="relative w-full max-w-5xl bg-white dark:bg-[#0f172a] rounded-3xl shadow-2xl border border-slate-200/90 dark:border-slate-800 overflow-hidden flex flex-col md:flex-row my-auto max-h-[96vh] sm:max-h-[94vh]">
         
         {/* =========================================================================
-            LEFT BRANDED SIDEBAR (Full-Bleed Convoy Image, Highlights, Tagline)
+            LEFT BRANDED SIDEBAR (Visible on md+ desktop/tablets)
            ========================================================================= */}
-        <div className="w-full md:w-[280px] lg:w-[320px] shrink-0 relative overflow-hidden flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-200/80 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 min-h-[360px] md:min-h-[580px]">
+        <div className="hidden md:flex md:w-[280px] lg:w-[320px] shrink-0 relative overflow-hidden flex-col justify-between border-r border-slate-200/80 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 min-h-[580px]">
           {/* Full-bleed background image covering 100% of the left panel */}
           <img
             src="/convoy.jpg"
@@ -757,22 +757,22 @@ export default function StartJourneyModal({
               </p>
             </div>
 
-            {/* Footer Action Buttons */}
-            <div className="pt-3 flex items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800/80">
+            {/* Footer Action Buttons (Responsive Layout) */}
+            <div className="pt-3 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 border-t border-slate-100 dark:border-slate-800/80">
               <button
                 type="button"
                 onClick={onClose}
                 disabled={submitting}
-                className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                className="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 min-h-[44px]"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
                 <span>Cancel</span>
               </button>
 
               <button
                 type="submit"
                 disabled={submitting}
-                className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-bold shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer min-h-[48px] active:scale-98 disabled:opacity-50"
               >
                 {submitting ? (
                   <>

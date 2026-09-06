@@ -284,81 +284,142 @@ export default function HubsView({ hubs = [], onSelectHubOnMap }) {
 
         </div>
 
-        {/* Table Content */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs font-sans">
-            <thead>
-              <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider">
-                <th className="pb-3 pl-2">#</th>
-                <th className="pb-3">Hub / Facility</th>
-                <th className="pb-3">Code</th>
-                <th className="pb-3">State & District</th>
-                <th className="pb-3">Coordinates (Lat, Lng)</th>
-                <th className="pb-3">Contact Officer</th>
-                <th className="pb-3">Contact Phone</th>
-                <th className="pb-3 pr-2 text-right">Map Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {filteredHubs.map((h, idx) => (
-                <tr key={h.id || `hub-${idx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                  <td className="py-3 pl-2 font-mono text-slate-400 font-bold">
-                    {idx + 1}
-                  </td>
-                  <td className="py-3">
-                    <div className="font-bold text-slate-900 dark:text-slate-100">
+        {/* Table / Card Content (Responsive Hybrid) */}
+        <>
+          {/* Mobile Card List (< md) */}
+          <div className="md:hidden space-y-3">
+            {filteredHubs.map((h, idx) => (
+              <div 
+                key={`mob-hub-${h.id || idx}`}
+                className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-3 font-sans"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white">
                       {h.hub_name}
-                    </div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {h.state} Supply Sector
-                    </div>
-                  </td>
-                  <td className="py-3 font-mono text-[11px] text-blue-600 dark:text-cyan-400 font-bold">
+                    </h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span>{h.state}, {h.district}</span>
+                    </p>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-cyan-400 border border-blue-200 dark:border-blue-800 shrink-0">
                     {h.hub_code}
-                  </td>
-                  <td className="py-3 font-medium text-slate-700 dark:text-slate-300">
-                    {h.state}, {h.district}
-                  </td>
-                  <td className="py-3 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                    {parseFloat(h.latitude).toFixed(4)}, {parseFloat(h.longitude).toFixed(4)}
-                  </td>
-                  <td className="py-3 text-slate-600 dark:text-slate-400">
-                    {h.contact_person || 'Logistics Officer'}
-                  </td>
-                  <td className="py-3">
-                    <button
-                      type="button"
-                      onClick={(e) => handleCopyPhone(h.contact_phone || '+91-94350-00000', h.id || idx, e)}
-                      className="inline-flex items-center space-x-1 font-mono text-[11px] text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-cyan-400 transition-colors cursor-pointer"
-                      title="Click to copy phone number"
-                    >
-                      <span>{h.contact_phone || '+91-94350-00000'}</span>
-                      {copiedId === (h.id || idx) ? (
-                        <Check className="w-3 h-3 text-emerald-500" />
-                      ) : (
-                        <Copy className="w-3 h-3 text-slate-400 hover:text-slate-600" />
-                      )}
-                    </button>
-                  </td>
-                  <td className="py-3 pr-2 text-right">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (onSelectHubOnMap) {
-                          onSelectHubOnMap(h);
-                        }
-                      }}
-                      className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-[11px] rounded-lg border border-blue-200 dark:border-blue-800 transition-colors inline-flex items-center space-x-1 cursor-pointer"
-                    >
-                      <Navigation className="w-3 h-3" />
-                      <span>Focus</span>
-                    </button>
-                  </td>
+                  </span>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-950/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 text-xs flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <span className="text-[10px] text-slate-400 block">Contact Officer</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">{h.contact_person || 'Logistics Officer'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => handleCopyPhone(h.contact_phone || '+91-94350-00000', h.id || idx, e)}
+                    className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>{h.contact_phone || '+91-94350-00000'}</span>
+                    {copiedId === (h.id || idx) ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                  </button>
+                </div>
+
+                <div className="pt-1 flex items-center justify-between">
+                  <span className="text-[11px] font-mono text-slate-400">
+                    GPS: {parseFloat(h.latitude).toFixed(4)}, {parseFloat(h.longitude).toFixed(4)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onSelectHubOnMap) {
+                        onSelectHubOnMap(h);
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs rounded-xl border border-blue-200 dark:border-blue-800 transition-colors inline-flex items-center space-x-1.5 cursor-pointer min-h-[40px] active:scale-98"
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                    <span>Focus on Map</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop Table View (>= md) */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-left text-xs font-sans">
+              <thead>
+                <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider">
+                  <th className="pb-3 pl-2">#</th>
+                  <th className="pb-3">Hub / Facility</th>
+                  <th className="pb-3">Code</th>
+                  <th className="pb-3">State & District</th>
+                  <th className="pb-3">Coordinates (Lat, Lng)</th>
+                  <th className="pb-3">Contact Officer</th>
+                  <th className="pb-3">Contact Phone</th>
+                  <th className="pb-3 pr-2 text-right">Map Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {filteredHubs.map((h, idx) => (
+                  <tr key={h.id || `hub-${idx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="py-3 pl-2 font-mono text-slate-400 font-bold">
+                      {idx + 1}
+                    </td>
+                    <td className="py-3">
+                      <div className="font-bold text-slate-900 dark:text-slate-100">
+                        {h.hub_name}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {h.state} Supply Sector
+                      </div>
+                    </td>
+                    <td className="py-3 font-mono text-[11px] text-blue-600 dark:text-cyan-400 font-bold">
+                      {h.hub_code}
+                    </td>
+                    <td className="py-3 font-medium text-slate-700 dark:text-slate-300">
+                      {h.state}, {h.district}
+                    </td>
+                    <td className="py-3 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                      {parseFloat(h.latitude).toFixed(4)}, {parseFloat(h.longitude).toFixed(4)}
+                    </td>
+                    <td className="py-3 text-slate-600 dark:text-slate-400">
+                      {h.contact_person || 'Logistics Officer'}
+                    </td>
+                    <td className="py-3">
+                      <button
+                        type="button"
+                        onClick={(e) => handleCopyPhone(h.contact_phone || '+91-94350-00000', h.id || idx, e)}
+                        className="inline-flex items-center space-x-1 font-mono text-[11px] text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-cyan-400 transition-colors cursor-pointer"
+                        title="Click to copy phone number"
+                      >
+                        <span>{h.contact_phone || '+91-94350-00000'}</span>
+                        {copiedId === (h.id || idx) ? (
+                          <Check className="w-3 h-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-slate-400 hover:text-slate-600" />
+                        )}
+                      </button>
+                    </td>
+                    <td className="py-3 pr-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onSelectHubOnMap) {
+                            onSelectHubOnMap(h);
+                          }
+                        }}
+                        className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-[11px] rounded-lg border border-blue-200 dark:border-blue-800 transition-colors inline-flex items-center space-x-1 cursor-pointer"
+                      >
+                        <Navigation className="w-3 h-3" />
+                        <span>Focus</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
 
       </div>
 

@@ -420,7 +420,7 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
 
         </div>
 
-        {/* 4. TABLE CONTENT OR MODERN EMPTY STATE */}
+        {/* 4. CONTENT: RESPONSIVE MOBILE CARDS (< md) + DESKTOP TABLE (md+) */}
         {filteredHazards.length === 0 ? (
           <div className="py-16 flex flex-col items-center justify-center text-center space-y-4">
             
@@ -456,173 +456,306 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
 
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs font-sans">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider">
-                  <th className="pb-3 pl-2">#</th>
-                  <th className="pb-3">Hazard / Road Event</th>
-                  <th className="pb-3">Severity</th>
-                  <th className="pb-3">Location & Sector</th>
-                  <th className="pb-3">Coordinates (Lat, Lng)</th>
-                  <th className="pb-3">Reporter / Source</th>
-                  <th className="pb-3">Evidence</th>
-                  <th className="pb-3 pr-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {filteredHazards.map((h, idx) => {
-                  const s = h.severity?.toLowerCase() || '';
-                  const sevBadge = 
-                    s === 'critical'
-                      ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800'
-                      : s === 'high'
-                      ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800'
-                      : s === 'medium'
-                      ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-                      : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
+          <>
+            {/* Mobile Card List (< md) */}
+            <div className="md:hidden space-y-3">
+              {filteredHazards.map((h, idx) => {
+                const s = h.severity?.toLowerCase() || '';
+                const sevBadge = 
+                  s === 'critical'
+                    ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                    : s === 'high'
+                    ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                    : s === 'medium'
+                    ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                    : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
 
-                  const isMine = user?.id && (h.reported_by_id === user.id || h.reported_by === user.id);
-                  const canDelete = isNodalOfficer || isMine;
+                const isMine = user?.id && (h.reported_by_id === user.id || h.reported_by === user.id);
 
-                  return (
-                    <tr key={h.id || `haz-${idx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                      <td className="py-3 pl-2 font-mono text-slate-400 font-bold">
-                        {idx + 1}
-                      </td>
-                      <td className="py-3">
-                        <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center space-x-1.5">
-                          <span>{h.title || 'Road Hazard Incident'}</span>
+                const geo = estimateNerLocationFallback(parseFloat(h.latitude), parseFloat(h.longitude));
+                const st = (h.state && h.state !== 'null' && h.state !== 'NER' && !(h.state === 'Assam' && h.district === 'Unspecified Sector'))
+                  ? h.state
+                  : geo.state;
+                const dt = (h.district && h.district !== 'Unspecified Sector' && h.district !== 'null' && h.district !== '')
+                  ? h.district
+                  : geo.district;
+
+                const mediaList = Array.isArray(h.media_urls) && h.media_urls.length > 0
+                  ? h.media_urls
+                  : (h.image_url || h.photo_url ? [h.image_url || h.photo_url] : []);
+                const hasVideo = mediaList.some(m => /\.(mp4|webm|mov|ogg|m4v)(\?.*)?$/i.test(m));
+
+                return (
+                  <div 
+                    key={`mob-haz-${h.id || idx}`}
+                    className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-3 font-sans"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                            {h.title || 'Road Hazard Incident'}
+                          </h4>
                           {isMine && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-cyan-100 dark:bg-cyan-950/80 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800">
+                            <span className="px-1.5 py-0.2 rounded text-[8.5px] font-mono font-bold bg-cyan-100 dark:bg-cyan-950/80 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800">
                               MY REPORT
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5">
-                          {h.description || h.notes || 'Field alert logged'}
-                        </div>
-                      </td>
-                      <td className="py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${sevBadge}`}>
-                          {h.severity || 'Moderate'}
-                        </span>
-                      </td>
-                      <td className="py-3 font-medium text-slate-700 dark:text-slate-300">
-                        {(() => {
-                          const geo = estimateNerLocationFallback(parseFloat(h.latitude), parseFloat(h.longitude));
-                          const st = (h.state && h.state !== 'null' && h.state !== 'NER' && !(h.state === 'Assam' && h.district === 'Unspecified Sector'))
-                            ? h.state
-                            : geo.state;
-                          const dt = (h.district && h.district !== 'Unspecified Sector' && h.district !== 'null' && h.district !== '')
-                            ? h.district
-                            : geo.district;
-                          return (
-                            <div>
-                              <span className="font-bold text-slate-900 dark:text-slate-100">{st}</span>
-                              <span className="text-slate-500 dark:text-slate-400 font-normal">, {dt}</span>
-                            </div>
-                          );
-                        })()}
-                      </td>
-                      <td className="py-3 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                        {parseFloat(h.latitude).toFixed(4)}, {parseFloat(h.longitude).toFixed(4)}
-                      </td>
-                      <td className="py-3 text-slate-600 dark:text-slate-400">
-                        {h.reported_by_name || 'Field Driver'}
-                      </td>
-                      <td className="py-3">
-                        {(() => {
-                          const mediaList = Array.isArray(h.media_urls) && h.media_urls.length > 0
-                            ? h.media_urls
-                            : (h.image_url || h.photo_url ? [h.image_url || h.photo_url] : []);
-                          
-                          if (mediaList.length === 0) {
-                            return <span className="text-slate-400 text-[10px] font-mono">None</span>;
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1 font-medium">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{st}, {dt}</span>
+                        </p>
+                      </div>
+
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border shrink-0 ${sevBadge}`}>
+                        {h.severity || 'Moderate'}
+                      </span>
+                    </div>
+
+                    {(h.description || h.notes) && (
+                      <p className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-950/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800/80 leading-relaxed">
+                        {h.description || h.notes}
+                      </p>
+                    )}
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 font-mono">
+                      <span>GPS: {parseFloat(h.latitude).toFixed(4)}, {parseFloat(h.longitude).toFixed(4)}</span>
+                      {mediaList.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setViewingMediaHazard(h)}
+                          className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-cyan-300 font-bold border border-blue-200 dark:border-blue-800 cursor-pointer"
+                        >
+                          {hasVideo ? <Film className="w-3 h-3 text-cyan-500" /> : <ImageIcon className="w-3 h-3 text-blue-500" />}
+                          <span>{mediaList.length} Media</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onSelectHazardOnMap) {
+                            onSelectHazardOnMap(h);
                           }
+                        }}
+                        className="py-2.5 px-3 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs rounded-xl border border-blue-200 dark:border-blue-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer min-h-[44px] active:scale-98"
+                      >
+                        <Navigation className="w-3.5 h-3.5" />
+                        <span>Locate on Map</span>
+                      </button>
 
-                          const hasVideo = mediaList.some(m => /\.(mp4|webm|mov|ogg|m4v)(\?.*)?$/i.test(m));
-
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => setViewingMediaHazard(h)}
-                              className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-950/80 hover:bg-blue-100 dark:hover:bg-blue-900/80 text-blue-700 dark:text-cyan-300 border border-blue-200 dark:border-blue-800 text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
-                              title="View uploaded evidence photos and videos"
-                            >
-                              {hasVideo ? <Film className="w-3 h-3 text-cyan-500" /> : <ImageIcon className="w-3 h-3 text-blue-500" />}
-                              <span>{mediaList.length} Media{mediaList.length > 1 ? 's' : ''}</span>
-                            </button>
-                          );
-                        })()}
-                      </td>
-                      <td className="py-3 pr-2 text-right">
-                        <div className="inline-flex items-center space-x-1.5">
-                          
-                          {/* Locate on map button */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (onSelectHazardOnMap) {
-                                onSelectHazardOnMap(h);
-                              }
-                            }}
-                            className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-[11px] rounded-lg border border-blue-200 dark:border-blue-800 transition-colors inline-flex items-center space-x-1 cursor-pointer"
-                            title="Locate hazard on interactive GIS map"
-                          >
-                            <Navigation className="w-3 h-3" />
-                            <span>Locate</span>
-                          </button>
-
-                          {/* Scoped Delete / Authority Override Action */}
-                          {isNodalOfficer ? (
-                            <button
-                              type="button"
-                              onClick={(e) => handleDeleteHazard(h, e)}
-                              disabled={deletingId === h.id}
-                              title="Government Nodal Authority Override: Resolve & Delete Record"
-                              className="px-2.5 py-1 bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-900/80 text-red-700 dark:text-red-300 font-bold text-[11px] rounded-lg border border-red-200 dark:border-red-800 transition-colors inline-flex items-center space-x-1 cursor-pointer disabled:opacity-50"
-                            >
-                              {deletingId === h.id ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                              ) : (
-                                <ShieldAlert className="w-3 h-3 text-red-500" />
-                              )}
-                              <span>Override: Delete</span>
-                            </button>
-                          ) : isMine ? (
-                            <button
-                              type="button"
-                              onClick={(e) => handleDeleteHazard(h, e)}
-                              disabled={deletingId === h.id}
-                              title="Clear & Delete My Hazard Report"
-                              className="px-2.5 py-1 bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-900/80 text-red-700 dark:text-red-300 font-bold text-[11px] rounded-lg border border-red-200 dark:border-red-800 transition-colors inline-flex items-center space-x-1 cursor-pointer disabled:opacity-50"
-                            >
-                              {deletingId === h.id ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                              ) : (
-                                <Trash2 className="w-3 h-3 text-red-500" />
-                              )}
-                              <span>Clear Hazard</span>
-                            </button>
+                      {isNodalOfficer ? (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteHazard(h, e)}
+                          disabled={deletingId === h.id}
+                          className="py-2.5 px-3 bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-900/80 text-red-700 dark:text-red-300 font-bold text-xs rounded-xl border border-red-200 dark:border-red-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50 min-h-[44px] active:scale-98"
+                        >
+                          {deletingId === h.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           ) : (
-                            <span 
-                              title="Read-only: Only the reporting driver or state authority can resolve this hazard"
-                              className="px-2 py-1 bg-slate-100 dark:bg-slate-800/60 text-slate-400 rounded-lg text-[10px] font-mono inline-flex items-center space-x-1 border border-slate-200 dark:border-slate-800 select-none cursor-default"
-                            >
-                              <Lock className="w-2.5 h-2.5" />
-                              <span>Read-Only</span>
-                            </span>
+                            <ShieldAlert className="w-3.5 h-3.5 text-red-500" />
                           )}
-
+                          <span>Override Delete</span>
+                        </button>
+                      ) : isMine ? (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteHazard(h, e)}
+                          disabled={deletingId === h.id}
+                          className="py-2.5 px-3 bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-900/80 text-red-700 dark:text-red-300 font-bold text-xs rounded-xl border border-red-200 dark:border-red-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50 min-h-[44px] active:scale-98"
+                        >
+                          {deletingId === h.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                          )}
+                          <span>Clear Hazard</span>
+                        </button>
+                      ) : (
+                        <div className="py-2.5 px-3 bg-slate-100 dark:bg-slate-800/60 text-slate-400 rounded-xl text-xs font-mono flex items-center justify-center space-x-1 border border-slate-200 dark:border-slate-800 select-none min-h-[44px]">
+                          <Lock className="w-3 h-3" />
+                          <span>Read-Only</span>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table View (>= md) */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs font-sans">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider">
+                    <th className="pb-3 pl-2">#</th>
+                    <th className="pb-3">Hazard / Road Event</th>
+                    <th className="pb-3">Severity</th>
+                    <th className="pb-3">Location & Sector</th>
+                    <th className="pb-3">Coordinates (Lat, Lng)</th>
+                    <th className="pb-3">Reporter / Source</th>
+                    <th className="pb-3">Evidence</th>
+                    <th className="pb-3 pr-2 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredHazards.map((h, idx) => {
+                    const s = h.severity?.toLowerCase() || '';
+                    const sevBadge = 
+                      s === 'critical'
+                        ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                        : s === 'high'
+                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                        : s === 'medium'
+                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                        : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
+
+                    const isMine = user?.id && (h.reported_by_id === user.id || h.reported_by === user.id);
+                    const canDelete = isNodalOfficer || isMine;
+
+                    return (
+                      <tr key={h.id || `haz-${idx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                        <td className="py-3 pl-2 font-mono text-slate-400 font-bold">
+                          {idx + 1}
+                        </td>
+                        <td className="py-3">
+                          <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center space-x-1.5">
+                            <span>{h.title || 'Road Hazard Incident'}</span>
+                            {isMine && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-cyan-100 dark:bg-cyan-950/80 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800">
+                                MY REPORT
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5">
+                            {h.description || h.notes || 'Field alert logged'}
+                          </div>
+                        </td>
+                        <td className="py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${sevBadge}`}>
+                            {h.severity || 'Moderate'}
+                          </span>
+                        </td>
+                        <td className="py-3 font-medium text-slate-700 dark:text-slate-300">
+                          {(() => {
+                            const geo = estimateNerLocationFallback(parseFloat(h.latitude), parseFloat(h.longitude));
+                            const st = (h.state && h.state !== 'null' && h.state !== 'NER' && !(h.state === 'Assam' && h.district === 'Unspecified Sector'))
+                              ? h.state
+                              : geo.state;
+                            const dt = (h.district && h.district !== 'Unspecified Sector' && h.district !== 'null' && h.district !== '')
+                              ? h.district
+                              : geo.district;
+                            return (
+                              <div>
+                                <span className="font-bold text-slate-900 dark:text-slate-100">{st}</span>
+                                <span className="text-slate-500 dark:text-slate-400 font-normal">, {dt}</span>
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td className="py-3 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                          {parseFloat(h.latitude).toFixed(4)}, {parseFloat(h.longitude).toFixed(4)}
+                        </td>
+                        <td className="py-3 text-slate-600 dark:text-slate-400">
+                          {h.reported_by_name || 'Field Driver'}
+                        </td>
+                        <td className="py-3">
+                          {(() => {
+                            const mediaList = Array.isArray(h.media_urls) && h.media_urls.length > 0
+                              ? h.media_urls
+                              : (h.image_url || h.photo_url ? [h.image_url || h.photo_url] : []);
+                            
+                            if (mediaList.length === 0) {
+                              return <span className="text-slate-400 text-[10px] font-mono">None</span>;
+                            }
+
+                            const hasVideo = mediaList.some(m => /\.(mp4|webm|mov|ogg|m4v)(\?.*)?$/i.test(m));
+
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => setViewingMediaHazard(h)}
+                                className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-950/80 hover:bg-blue-100 dark:hover:bg-blue-900/80 text-blue-700 dark:text-cyan-300 border border-blue-200 dark:border-blue-800 text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
+                                title="View uploaded evidence photos and videos"
+                              >
+                                {hasVideo ? <Film className="w-3 h-3 text-cyan-500" /> : <ImageIcon className="w-3 h-3 text-blue-500" />}
+                                <span>{mediaList.length} Media{mediaList.length > 1 ? 's' : ''}</span>
+                              </button>
+                            );
+                          })()}
+                        </td>
+                        <td className="py-3 pr-2 text-right">
+                          <div className="inline-flex items-center space-x-1.5">
+                            
+                            {/* Locate on map button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onSelectHazardOnMap) {
+                                  onSelectHazardOnMap(h);
+                                }
+                              }}
+                              className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-[11px] rounded-lg border border-blue-200 dark:border-blue-800 transition-colors inline-flex items-center space-x-1 cursor-pointer"
+                              title="Locate hazard on interactive GIS map"
+                            >
+                              <Navigation className="w-3 h-3" />
+                              <span>Locate</span>
+                            </button>
+
+                            {/* Scoped Delete / Authority Override Action */}
+                            {isNodalOfficer ? (
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteHazard(h, e)}
+                                disabled={deletingId === h.id}
+                                title="Government Nodal Authority Override: Resolve & Delete Record"
+                                className="px-2.5 py-1 bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-900/80 text-red-700 dark:text-red-300 font-bold text-[11px] rounded-lg border border-red-200 dark:border-red-800 transition-colors inline-flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                              >
+                                {deletingId === h.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <ShieldAlert className="w-3 h-3 text-red-500" />
+                                )}
+                                <span>Override: Delete</span>
+                              </button>
+                            ) : isMine ? (
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteHazard(h, e)}
+                                disabled={deletingId === h.id}
+                                title="Clear & Delete My Hazard Report"
+                                className="px-2.5 py-1 bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-900/80 text-red-700 dark:text-red-300 font-bold text-[11px] rounded-lg border border-red-200 dark:border-red-800 transition-colors inline-flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                              >
+                                {deletingId === h.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-3 h-3 text-red-500" />
+                                )}
+                                <span>Clear Hazard</span>
+                              </button>
+                            ) : (
+                              <span 
+                                title="Read-only: Only the reporting driver or state authority can resolve this hazard"
+                                className="px-2 py-1 bg-slate-100 dark:bg-slate-800/60 text-slate-400 rounded-lg text-[10px] font-mono inline-flex items-center space-x-1 border border-slate-200 dark:border-slate-800 select-none cursor-default"
+                              >
+                                <Lock className="w-2.5 h-2.5" />
+                                <span>Read-Only</span>
+                              </span>
+                            )}
+
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
       </div>

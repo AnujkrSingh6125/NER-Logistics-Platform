@@ -151,6 +151,9 @@ export default function Home() {
   const [journeyNotice, setJourneyNotice] = useState(null);
   const [isManifestModalOpen, setIsManifestModalOpen] = useState(false);
 
+  // 📱 Mobile View Segmented Tab State ('route' | 'telemetry' | 'hazards')
+  const [mobileTab, setMobileTab] = useState('route');
+
   // Check active transit journey on mount
   useEffect(() => {
     async function loadActiveJourney() {
@@ -238,7 +241,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [activeJourney, userLocation?.coords, user?.id]);
 
-  // Global event listener for Pin Hazard Location from any view
+  // Global event listener for Pin Hazard Location and Open Hazard Modal
   useEffect(() => {
     const handleGlobalStartMapPick = (e) => {
       const formData = e.detail;
@@ -248,10 +251,16 @@ export default function Home() {
       setIsPickingLocation(true);
     };
 
+    const handleOpenHazardModal = () => {
+      setHazardModalOpen(true);
+    };
+
     if (typeof window !== 'undefined') {
       window.addEventListener('ner_start_map_pick', handleGlobalStartMapPick);
+      window.addEventListener('ner_open_hazard_modal', handleOpenHazardModal);
       return () => {
         window.removeEventListener('ner_start_map_pick', handleGlobalStartMapPick);
+        window.removeEventListener('ner_open_hazard_modal', handleOpenHazardModal);
       };
     }
   }, [setCurrentView]);
@@ -854,14 +863,13 @@ export default function Home() {
 
           </div>
 
-          {/* 3. TOP DASHBOARD 3-COLUMN WORKBENCH */}
+          {/* 3. TOP DASHBOARD 3-COLUMN WORKBENCH (Mobile-First Layout) */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         
         {/* ========================================================================= */}
+        {/* COLUMN 1: LEFT ROUTE NAVIGATOR (Span 3 on Desktop, Tabbed on Mobile)       */}
         {/* ========================================================================= */}
-        {/* COLUMN 1: LEFT ROUTE NAVIGATOR (Span 3 on Desktop)                         */}
-        {/* ========================================================================= */}
-        <div className="lg:col-span-3 space-y-3.5 flex flex-col">
+        <div className={`order-2 lg:order-1 lg:col-span-3 space-y-3.5 ${mobileTab === 'route' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'}`}>
           <RouteNavigator
             hubs={hubs}
             originHubId={originHubId}
@@ -888,9 +896,9 @@ export default function Home() {
         </div>
 
         {/* ========================================================================= */}
-        {/* COLUMN 2: CENTER INTERACTIVE MAP VIEW (Span 6 on Desktop)                  */}
+        {/* COLUMN 2: CENTER INTERACTIVE MAP VIEW (Order 1 on Mobile, Span 6 Desktop)  */}
         {/* ========================================================================= */}
-        <div className="lg:col-span-6 space-y-3.5 flex flex-col">
+        <div className="order-1 lg:order-2 lg:col-span-6 space-y-3 flex flex-col">
           
           {/* Section Header */}
           <div className="flex items-center justify-between px-1">
@@ -904,7 +912,7 @@ export default function Home() {
           </div>
 
           {/* Interactive Map Component Container with Live Geolocation Tracking */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-2.5 border border-slate-200/90 dark:border-slate-800 shadow-xs overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-2 sm:p-2.5 border border-slate-200/90 dark:border-slate-800 shadow-xs overflow-hidden">
             <TacticalHubMap
               height="490px"
               activeTileStyle={activeTileStyle}
@@ -944,12 +952,57 @@ export default function Home() {
             />
           </div>
 
+          {/* Driver Mobile Segmented Control Bar (Visible on phones & tablets < lg) */}
+          <div className="flex lg:hidden items-center bg-slate-200/90 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-300/80 dark:border-slate-800 text-xs font-mono font-bold shadow-xs">
+            <button
+              type="button"
+              onClick={() => setMobileTab('route')}
+              className={`flex-1 py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                mobileTab === 'route'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Route className="w-3.5 h-3.5" />
+              <span>Route</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileTab('telemetry')}
+              className={`flex-1 py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                mobileTab === 'telemetry'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Telemetry</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileTab('hazards')}
+              className={`flex-1 py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                mobileTab === 'hazards'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+              <span>Choke Points</span>
+              {hazards.length > 0 && (
+                <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.2 rounded-full font-bold">
+                  {hazards.length}
+                </span>
+              )}
+            </button>
+          </div>
+
         </div>
 
         {/* ========================================================================= */}
-        {/* COLUMN 3: RIGHT ACTION & TELEMETRY PANEL (Span 3 on Desktop)               */}
+        {/* COLUMN 3: RIGHT ACTION & TELEMETRY PANEL (Span 3 on Desktop, Tabbed on Mob)*/}
         {/* ========================================================================= */}
-        <div className="lg:col-span-3 space-y-3.5 flex flex-col">
+        <div className={`order-3 lg:col-span-3 space-y-3.5 ${mobileTab === 'telemetry' || mobileTab === 'hazards' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'}`}>
           
           {/* CORRIDOR TELEMETRY Card */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-3.5 font-mono">

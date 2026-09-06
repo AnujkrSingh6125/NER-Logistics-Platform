@@ -4,6 +4,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { NavProvider } from "@/context/NavContext";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
+import MobileBottomNav from "@/components/MobileBottomNav";
 import AuthGuard from "@/components/AuthGuard";
 
 const geistSans = Geist({
@@ -107,12 +108,13 @@ export default function RootLayout({ children }) {
           <AuthGuard>
             <NavProvider>
               <Navbar />
-              <div className="flex-1 flex min-h-0">
+              <div className="flex-1 flex min-h-0 pb-18 md:pb-0">
                 <Sidebar />
                 <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
                   {children}
                 </main>
               </div>
+              <MobileBottomNav />
             </NavProvider>
           </AuthGuard>
         </AuthProvider>

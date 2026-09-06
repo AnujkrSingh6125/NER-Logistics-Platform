@@ -460,7 +460,104 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
             </div>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            {/* Mobile Shipment Cards (< md) */}
+            <div className="md:hidden space-y-3">
+            {filteredShipments.map((s, idx) => {
+              const st = (s.status || '').toLowerCase();
+              const isInTransit = st === 'in_transit' || st === 'in-transit' || st === 'active';
+              const isDelivered = st === 'delivered' || st === 'completed';
+
+              return (
+                <div 
+                  key={`mob-ship-${s.id || s.tracking_code || idx}`}
+                  className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-3 font-sans"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="font-mono font-bold text-xs text-blue-600 dark:text-cyan-400 block">
+                        {s.tracking_code || `TRK-${(s.id || '4921').slice(0, 8)}`}
+                      </span>
+                      <h4 className="font-bold text-sm text-slate-900 dark:text-white mt-0.5">
+                        {s.cargo_type || s.commodity_type || 'Emergency Relief Supplies'}
+                      </h4>
+                    </div>
+                    <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border shrink-0 ${
+                      isInTransit
+                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                        : isDelivered
+                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border-blue-300 dark:border-blue-800'
+                        : 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${isInTransit ? 'bg-emerald-500 animate-pulse' : isDelivered ? 'bg-blue-500' : 'bg-amber-500'}`} />
+                      <span>{isInTransit ? 'In Transit' : isDelivered ? 'Delivered' : 'Pending'}</span>
+                    </span>
+                  </div>
+
+                  {/* Corridor Path */}
+                  <div className="bg-slate-50 dark:bg-slate-950/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 text-xs space-y-1">
+                    <div className="text-slate-500 dark:text-slate-400 font-mono text-[10px] uppercase font-bold">Transit Corridor</div>
+                    <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                      <span className="truncate">{s.origin_hub_name || s.origin || 'Guwahati Hub'}</span>
+                      <span className="text-slate-400">➔</span>
+                      <span className="truncate">{s.dest_hub_name || s.destination_district || s.destination_state || 'Regional Depot'}</span>
+                    </div>
+                  </div>
+
+                  {/* Stats row */}
+                  <div className="flex items-center justify-between text-xs font-mono text-slate-600 dark:text-slate-400 pt-0.5">
+                    <span>Weight: <strong className="text-slate-900 dark:text-white">{s.cargo_weight_val || s.quantity_tons || '15.0'} {s.cargo_weight_unit || 'MT'}</strong></span>
+                    <span>Driver: <strong className="text-cyan-600 dark:text-cyan-400">{s.driver_code || 'DRV-NER'}</strong></span>
+                  </div>
+
+                  {/* Action Buttons Grid */}
+                  <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                    {(s.current_lat || s.current_latitude) ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onSelectShipmentOnMap) {
+                            onSelectShipmentOnMap(s);
+                          }
+                        }}
+                        className="py-2.5 px-2 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs rounded-xl border border-blue-200 dark:border-blue-800 transition-colors flex items-center justify-center space-x-1 cursor-pointer min-h-[44px] active:scale-98"
+                      >
+                        <Navigation className="w-3.5 h-3.5" />
+                        <span>Radar</span>
+                      </button>
+                    ) : (
+                      <div />
+                    )}
+
+                    {isInTransit ? (
+                      <button
+                        type="button"
+                        onClick={() => handleMarkDelivered(s)}
+                        className="py-2.5 px-2 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 font-bold text-xs rounded-xl border border-emerald-200 dark:border-emerald-800 transition-colors flex items-center justify-center space-x-1 cursor-pointer min-h-[44px] active:scale-98"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Delivered</span>
+                      </button>
+                    ) : (
+                      <div />
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteShipment(s)}
+                      className="py-2.5 px-2 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 font-bold text-xs rounded-xl border border-rose-200 dark:border-rose-800 transition-colors flex items-center justify-center space-x-1 cursor-pointer min-h-[44px] active:scale-98"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop Table View (>= md) */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs font-sans">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider">
@@ -561,6 +658,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
               </tbody>
             </table>
           </div>
+        </>
         )}
 
       </div>
