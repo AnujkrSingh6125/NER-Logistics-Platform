@@ -25,7 +25,7 @@ import { supabase } from '@/lib/supabaseClient';
 import LiveClockWidget from '@/components/LiveClockWidget';
 
 export default function SettingsView() {
-  const { user, profile, isNodalOfficer, nodalOfficer, signOut } = useAuth();
+  const { user, profile, isNodalOfficer, nodalOfficer, signOut, deleteAccount } = useAuth();
   const router = useRouter();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -57,22 +57,11 @@ export default function SettingsView() {
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      // 1. Invoke Supabase RPC to purge data and auth record
-      const { error: rpcError } = await supabase.rpc('delete_user_account');
-
-      if (rpcError) {
-        console.warn('RPC delete_user_account returned error, falling back to direct table purge:', rpcError.message);
-        if (user?.id) {
-          await supabase.from('driver_profiles').delete().eq('id', user.id);
-          await supabase.from('road_hazards').delete().eq('reported_by_id', user.id);
-        }
+      const res = await deleteAccount();
+      if (!res?.success && res?.error) {
+        throw new Error(res.error);
       }
-
-      // 2. Clear storage & sign out
-      await signOut();
       if (typeof window !== 'undefined') {
-        localStorage.clear();
-        sessionStorage.clear();
         window.location.href = '/login';
       }
     } catch (err) {

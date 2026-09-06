@@ -436,39 +436,104 @@ export function AuthProvider({ children }) {
   const deleteAccount = useCallback(async () => {
     setLoading(true);
     try {
-      if (nodalOfficer) {
-        // If Nodal Officer, deactivate and remove local session
+      const targetUserId = user?.id;
+
+      // 1. Direct Table Deletions (Client-Side Cascade)
+      if (targetUserId) {
+        // A. Delete user's shipments / active convoys
         try {
+          await supabase.from('shipments').delete().eq('driver_id', targetUserId);
+        } catch (e) {
+          console.warn('Shipment driver_id purge note:', e);
+        }
+        try {
+          await supabase.from('shipments').delete().eq('assigned_driver_id', targetUserId);
+        } catch (e) {
+          console.warn('Shipment assigned_driver_id purge note:', e);
+        }
+
+        // B. Delete user's reported road hazards
+        try {
+          await supabase.from('road_hazards').delete().eq('reported_by', targetUserId);
+        } catch (e) {
+          console.warn('Road hazard reported_by purge note:', e);
+        }
+        try {
+          await supabase.from('road_hazards').delete().eq('reported_by_id', targetUserId);
+        } catch (e) {
+          console.warn('Road hazard reported_by_id purge note:', e);
+        }
+
+        // C. Delete driver profile
+        try {
+          await supabase.from('driver_profiles').delete().eq('id', targetUserId);
+        } catch (e) {
+          console.warn('Driver profile purge note:', e);
+        }
+
+        // D. Invoke Postgres RPC function delete_user_account() if installed
+        try {
+          await supabase.rpc('delete_user_account');
+        } catch (rpcErr) {
+          console.warn('RPC delete_user_account note:', rpcErr);
+        }
+
+        // E. Call Backend API Route to delete auth.users record via Admin client
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token;
+          await fetch('/api/auth/delete-account', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ userId: targetUserId }),
+          });
+        } catch (apiErr) {
+          console.warn('API delete-account call note:', apiErr);
+        }
+      }
+
+      if (nodalOfficer) {
+        try {
+          if (nodalOfficer.officer_name) {
+            await supabase.from('road_hazards').delete().ilike('reported_by_name', `%${nodalOfficer.officer_name}%`);
+          }
+          if (nodalOfficer.emergency_contact) {
+            await supabase.from('road_hazards').delete().eq('reported_by_contact', nodalOfficer.emergency_contact);
+          }
           await supabase
             .from('nodal_officers')
             .update({ is_active: false })
             .eq('id', nodalOfficer.id);
         } catch (e) {}
-      } else if (user?.id) {
-        // Call RPC delete_user_account
-        const { error: rpcError } = await supabase.rpc('delete_user_account');
-        if (rpcError) {
-          console.warn('RPC delete_user_account fallback:', rpcError);
-          try {
-            await supabase.from('driver_profiles').delete().eq('id', user.id);
-            await supabase.from('road_hazards').update({ reported_by: null }).eq('reported_by', user.id);
-            await supabase.from('shipments').update({ assigned_driver_id: null }).eq('assigned_driver_id', user.id);
-          } catch (delErr) {}
-        }
       }
 
+      // 2. Dispatch real-time events to immediately clear UI & map pins
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ner_hazard_deleted', { detail: { allForUser: true } }));
+        window.dispatchEvent(new CustomEvent('ner_journey_deleted', { detail: { allForUser: true } }));
+      }
+
+      // 3. Clear auth session and local storage
       try {
         await supabase.auth.signOut();
       } catch (signOutErr) {}
+
       currentUserIdRef.current = null;
       setUser(null);
       setSession(null);
       setProfile(null);
       setNodalOfficer(null);
+
       if (typeof window !== 'undefined') {
         localStorage.clear();
         sessionStorage.clear();
+        document.cookie = 'ner_nodal_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;';
+        document.cookie = 'ner_field_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;';
       }
+
       return { success: true };
     } catch (err) {
       console.error('Error deleting account:', err);
