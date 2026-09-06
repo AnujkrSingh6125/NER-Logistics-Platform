@@ -3,12 +3,15 @@ import { NextResponse } from 'next/server';
 
 export async function POST(req) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = 
+      process.env.GEMINI_API_KEY || 
+      process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+
     if (!apiKey) {
       return NextResponse.json(
         { 
           success: false, 
-          error: 'GEMINI_API_KEY is not configured in .env.local. Please add your key to enable AI verification.' 
+          error: 'GEMINI_API_KEY is not configured on the server. Please add GEMINI_API_KEY in your Vercel Environment Variables.' 
         },
         { status: 500 }
       );

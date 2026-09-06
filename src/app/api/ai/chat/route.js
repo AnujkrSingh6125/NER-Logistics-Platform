@@ -9,11 +9,14 @@ import { GoogleGenAI } from '@google/genai';
  */
 export async function POST(req) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = 
+      process.env.GEMINI_API_KEY || 
+      process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+
     if (!apiKey) {
       return NextResponse.json({
         success: false,
-        error: 'GEMINI_API_KEY is not configured on the server.',
+        error: 'GEMINI_API_KEY is not configured on the server. Please add GEMINI_API_KEY in your Vercel Environment Variables.',
       }, { status: 500 });
     }
 
