@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://ner-logistics-platform-gamma.vercel.app';
-const PREVIEW_IMAGE = '/convoy.jpg';
+const PREVIEW_IMAGE = '/logo.png';
 const LOGO_IMAGE = '/logo.png';
 
 export const metadata = {
@@ -73,9 +73,10 @@ export const metadata = {
     images: [
       {
         url: PREVIEW_IMAGE,
-        width: 1200,
-        height: 630,
-        alt: 'AshtaMarg Tactical Fleet & Hazard Operations',
+        width: 1024,
+        height: 1024,
+        alt: 'AshtaMarg - Tactical Logistics & Disaster Response Platform',
+        type: 'image/png',
       },
     ],
   },
