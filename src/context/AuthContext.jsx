@@ -164,11 +164,27 @@ export function AuthProvider({ children }) {
         const validUser = userData.user;
         const { data: { session: currentSession } } = await supabase.auth.getSession();
 
+        const userProfileData = await fetchUserProfile(validUser.id, validUser.user_metadata);
+
+        if (!userProfileData) {
+          // Profile deleted from database -> terminate session
+          await supabase.auth.signOut().catch(() => {});
+          currentUserIdRef.current = null;
+          setUser(null);
+          setSession(null);
+          setProfile(null);
+          setNodalOfficer(null);
+          if (typeof window !== 'undefined') {
+            localStorage.clear();
+            sessionStorage.clear();
+          }
+          return;
+        }
+
         if (mounted) {
           currentUserIdRef.current = validUser.id;
           setSession(currentSession);
           setUser(validUser);
-          await fetchUserProfile(validUser.id, validUser.user_metadata);
         }
       } catch (err) {
         console.error('Error initializing session:', err);
@@ -208,10 +224,24 @@ export function AuthProvider({ children }) {
 
       const newUserId = newSession.user.id;
       if (currentUserIdRef.current !== newUserId || event === 'SIGNED_IN') {
+        const profileData = await fetchUserProfile(newSession.user.id, newSession.user.user_metadata);
+        if (!profileData) {
+          await supabase.auth.signOut().catch(() => {});
+          currentUserIdRef.current = null;
+          setUser(null);
+          setSession(null);
+          setProfile(null);
+          setNodalOfficer(null);
+          if (typeof window !== 'undefined') {
+            localStorage.clear();
+            sessionStorage.clear();
+          }
+          setLoading(false);
+          return;
+        }
         currentUserIdRef.current = newUserId;
         setSession(newSession);
         setUser(newSession.user);
-        await fetchUserProfile(newSession.user.id, newSession.user.user_metadata);
       }
       setLoading(false);
     });
@@ -234,6 +264,21 @@ export function AuthProvider({ children }) {
       if (error) throw error;
 
       if (data?.user) {
+        // Verify profile exists in driver_profiles table
+        const profileData = await fetchUserProfile(data.user.id, data.user.user_metadata);
+        if (!profileData) {
+          await supabase.auth.signOut().catch(() => {});
+          currentUserIdRef.current = null;
+          setUser(null);
+          setSession(null);
+          setProfile(null);
+          if (typeof window !== 'undefined') {
+            localStorage.clear();
+            sessionStorage.clear();
+          }
+          throw new Error('Access Denied: This account has been deleted or purged. Please register for a new account.');
+        }
+
         // Clear any previous nodal session
         setNodalOfficer(null);
         if (typeof window !== 'undefined') {
@@ -243,7 +288,6 @@ export function AuthProvider({ children }) {
         currentUserIdRef.current = data.user.id;
         setUser(data.user);
         setSession(data.session);
-        await fetchUserProfile(data.user.id, data.user.user_metadata);
       }
       return { data, error: null };
     } catch (error) {

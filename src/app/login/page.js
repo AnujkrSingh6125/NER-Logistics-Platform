@@ -256,14 +256,38 @@ export default function LoginPage({ onAuthSuccess }) {
           } else {
             setFormMsg({
               type: 'error',
-              text: 'Access Denied: Account not found or incorrect passcode.',
+              text: 'Access Denied: Invalid email or passcode.',
             });
           }
           setLoading(false);
           return;
         }
 
-        if (data?.session || data?.user) {
+        const authenticatedUser = data?.user || data?.session?.user;
+
+        if (authenticatedUser) {
+          // Verify that this user's profile actually exists in public.driver_profiles
+          const { data: profileRow, error: profileErr } = await supabase
+            .from('driver_profiles')
+            .select('id, full_name, email')
+            .eq('id', authenticatedUser.id)
+            .maybeSingle();
+
+          if (profileErr || !profileRow) {
+            // Account was deleted in Supabase Table Editor or purged
+            await supabase.auth.signOut().catch(() => {});
+            if (typeof window !== 'undefined') {
+              localStorage.clear();
+              sessionStorage.clear();
+            }
+            setFormMsg({
+              type: 'error',
+              text: 'Access Denied: This account has been deleted or purged. Please register for a new account.',
+            });
+            setLoading(false);
+            return;
+          }
+
           setFormMsg({
             type: 'success',
             text: '[✓] Operator authenticated. Launching Tactical Center...',
