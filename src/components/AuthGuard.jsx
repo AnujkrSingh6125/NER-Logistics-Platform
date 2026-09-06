@@ -20,7 +20,7 @@ export default function AuthGuard({ children }) {
                       pathname.startsWith('/nodal-login') || 
                       pathname.startsWith('/auth');
 
-  const isAuthenticated = Boolean(user || nodalOfficer || profile);
+  const isAuthenticated = Boolean((user && profile) || nodalOfficer);
 
   useEffect(() => {
     if (mounted && !authLoading) {

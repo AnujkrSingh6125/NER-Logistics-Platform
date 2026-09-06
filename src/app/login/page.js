@@ -208,50 +208,15 @@ export default function LoginPage({ onAuthSuccess }) {
 
         // Check if user already existed in Supabase Auth (empty identities array)
         if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-          // Attempt sign in with password to restore/re-provision profile
-          const { data: logData, error: logErr } = await supabase.auth.signInWithPassword({
-            email: email.trim().toLowerCase(),
-            password: password,
+          setFormMsg({
+            type: 'error',
+            text: 'This email is already registered in the system. Please switch to the "Sign In" tab to log in with your password, or use a different email address to register.',
           });
-
-          if (!logErr && logData?.user) {
-            try {
-              await supabase.from('driver_profiles').upsert({
-                id: logData.user.id,
-                full_name: fullName.trim() || logData.user.user_metadata?.full_name || 'Field Operator',
-                phone: `+91${phone.trim()}`,
-                email: email.trim().toLowerCase(),
-                driver_code: `DRV-NER-${logData.user.id.slice(0, 4).toUpperCase()}`,
-                vehicle_number: vNum,
-                is_active_duty: false,
-                last_ping: new Date().toISOString(),
-              }, { onConflict: 'id' });
-            } catch (pErr) {}
-
-            setFormMsg({
-              type: 'success',
-              text: '[✓] Operator authenticated! Launching Tactical Center...',
-            });
-
-            if (onAuthSuccess && logData?.session) {
-              onAuthSuccess(logData.session);
-            }
-
-            setTimeout(() => {
-              window.location.replace('/');
-            }, 500);
-            return;
-          } else {
-            setFormMsg({
-              type: 'error',
-              text: 'This email is already registered in the system. Please switch to the Sign In tab and log in.',
-            });
-            setLoading(false);
-            return;
-          }
+          setLoading(false);
+          return;
         }
 
-        // If immediate session created (e.g. email confirmations auto-confirmed)
+        // If immediate session created (e.g. email confirmations auto-confirmed in Supabase settings)
         if (data?.session && data?.user) {
           try {
             await supabase.from('driver_profiles').upsert({
@@ -322,32 +287,22 @@ export default function LoginPage({ onAuthSuccess }) {
         const authenticatedUser = data?.user || data?.session?.user;
 
         if (authenticatedUser) {
-          // Ensure driver profile exists in public.driver_profiles (auto-heal if missing)
-          try {
-            const { data: profileRow } = await supabase
-              .from('driver_profiles')
-              .select('id')
-              .eq('id', authenticatedUser.id)
-              .maybeSingle();
+          // Strictly verify driver profile exists in public.driver_profiles
+          const { data: profileRow } = await supabase
+            .from('driver_profiles')
+            .select('id')
+            .eq('id', authenticatedUser.id)
+            .maybeSingle();
 
-            if (!profileRow) {
-              const vNum = authenticatedUser.user_metadata?.vehicle_number || 'AS-01-AX-9921';
-              const fName = authenticatedUser.user_metadata?.full_name || authenticatedUser.email?.split('@')[0] || 'Field Operator';
-              const uPhone = authenticatedUser.user_metadata?.phone || '';
-
-              await supabase.from('driver_profiles').upsert({
-                id: authenticatedUser.id,
-                full_name: fName,
-                phone: uPhone,
-                email: authenticatedUser.email,
-                driver_code: `DRV-NER-${authenticatedUser.id.slice(0, 4).toUpperCase()}`,
-                vehicle_number: vNum,
-                is_active_duty: false,
-                last_ping: new Date().toISOString(),
-              }, { onConflict: 'id' });
-            }
-          } catch (healErr) {
-            console.warn('Driver profile restore notice:', healErr);
+          if (!profileRow) {
+            // Account was deleted/purged -> strictly reject login and sign out
+            await supabase.auth.signOut().catch(() => {});
+            setFormMsg({
+              type: 'error',
+              text: 'Access Denied: This account has been deleted or purged. Please create a new account to register.',
+            });
+            setLoading(false);
+            return;
           }
 
           setFormMsg({
