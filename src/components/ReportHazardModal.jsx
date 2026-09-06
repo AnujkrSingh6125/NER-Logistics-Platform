@@ -30,6 +30,7 @@ import {
   CloudUpload,
   Layers
 } from 'lucide-react';
+import MountainLogo from '@/components/MountainLogo';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
 import { reverseGeocode } from '@/lib/geoUtils';
@@ -775,12 +776,10 @@ export default function ReportHazardModal({
           <div className="relative z-10 p-5 sm:p-6 pb-2 space-y-4">
             {/* Top Brand Header */}
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
-                <Radio className="w-5 h-5" />
-              </div>
+              <MountainLogo className="w-9 h-9" />
               <div>
                 <h2 className="text-base font-extrabold tracking-tight text-slate-900 dark:text-white leading-none">
-                  NER-LOGIX
+                  AshtaMarg
                 </h2>
                 <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mt-0.5">
                   Tactical Logistics

@@ -25,6 +25,7 @@ import {
   ArrowLeft,
   RotateCcw
 } from 'lucide-react';
+import MountainLogo from '@/components/MountainLogo';
 
 const NER_STATES = [
   'Assam',
@@ -435,6 +436,19 @@ export default function LoginPage({ onAuthSuccess }) {
           {/* ================= LEFT HERO COLUMN ================= */}
           <div className="lg:col-span-5 space-y-6 sm:space-y-8 animate-fadeIn">
             
+            {/* Platform Brand Identity Header */}
+            <Link href="/" className="inline-flex items-center space-x-3 group">
+              <MountainLogo className="w-11 h-11 drop-shadow-md group-hover:scale-105 transition-transform" />
+              <div>
+                <span className="text-xl font-black tracking-tight text-white font-sans block group-hover:text-cyan-400 transition-colors">
+                  AshtaMarg
+                </span>
+                <span className="text-[11px] font-medium text-cyan-400/90 tracking-wide">
+                  Tactical Logistics • 8 NER States
+                </span>
+              </div>
+            </Link>
+
             {/* Tagline Badge */}
             <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-xs font-mono font-bold tracking-wider shadow-inner">
               <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
@@ -734,7 +748,7 @@ export default function LoginPage({ onAuthSuccess }) {
                         required
                         value={email}
                         onChange={(e) => { setEmail(e.target.value); clearMessages(); }}
-                        placeholder="e.g. operator.field@nerlogix.in"
+                        placeholder="e.g. operator.field@ashtamarg.in"
                         autoComplete="off"
                         className="w-full bg-slate-950/90 border border-slate-800 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition-all pl-9"
                       />
@@ -844,7 +858,7 @@ export default function LoginPage({ onAuthSuccess }) {
                 “Prepared people build resilient regions.”
               </p>
               <div className="text-[10px] font-mono font-bold text-cyan-400 tracking-wider">
-                — NER-LOGIX
+                — AshtaMarg
               </div>
             </div>
 

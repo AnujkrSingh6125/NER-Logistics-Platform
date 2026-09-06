@@ -27,6 +27,7 @@ import {
   Phone
 } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
+import MountainLogo from '@/components/MountainLogo';
 
 const NODAL_DIRECTORATES = [
   {
@@ -222,6 +223,19 @@ export default function NodalLoginPage() {
           {/* ================= LEFT HERO COLUMN ================= */}
           <div className="lg:col-span-5 space-y-6 sm:space-y-8 animate-fadeIn">
             
+            {/* Platform Brand Identity Header */}
+            <Link href="/" className="inline-flex items-center space-x-3 group">
+              <MountainLogo className="w-11 h-11 drop-shadow-md group-hover:scale-105 transition-transform" />
+              <div>
+                <span className="text-xl font-black tracking-tight text-white font-sans block group-hover:text-amber-400 transition-colors">
+                  AshtaMarg
+                </span>
+                <span className="text-[11px] font-medium text-amber-400/90 tracking-wide">
+                  State Disaster Logistics • 8 NER States
+                </span>
+              </div>
+            </Link>
+
             {/* Tagline Badge */}
             <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-amber-950/60 border border-amber-500/30 text-amber-300 text-xs font-mono font-bold tracking-wider shadow-inner">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />

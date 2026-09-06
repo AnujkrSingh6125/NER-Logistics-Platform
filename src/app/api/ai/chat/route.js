@@ -103,7 +103,7 @@ export async function POST(req) {
     ) : 'OPERATOR GPS STATUS: Not shared or unavailable. Provide general corridor guidance.';
 
     const systemInstruction = `
-You are the NER-LOGIX Tactical Logistics & Disaster Copilot for the North-Eastern Region (NER) of India, covering all 8 states: Assam, Arunachal Pradesh, Meghalaya, Manipur, Mizoram, Nagaland, Tripura, and Sikkim.
+You are the AshtaMarg Tactical Logistics & Disaster Copilot for the North-Eastern Region (NER) of India, covering all 8 states: Assam, Arunachal Pradesh, Meghalaya, Manipur, Mizoram, Nagaland, Tripura, and Sikkim.
 
 Your mission is to assist citizen drivers, emergency relief convoys, and government Nodal Disaster Officers with real-time route intelligence, road hazard awareness, live monsoon & weather alerts, supply depot logistics, and emergency Standard Operating Procedures (SOPs).
 

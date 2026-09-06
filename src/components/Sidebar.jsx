@@ -125,10 +125,10 @@ export default function Sidebar({
           {/* Header with Close Button */}
           <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center space-x-2.5">
-              <MountainLogo className="w-6 h-6" />
+              <MountainLogo className="w-8 h-8" />
               <div>
                 <span className="font-black font-mono text-slate-900 dark:text-white text-sm tracking-wider block">
-                  NER-LOGIX
+                  AshtaMarg
                 </span>
                 <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400">TACTICAL LOGISTICS</p>
               </div>
@@ -239,7 +239,7 @@ export default function Sidebar({
 
           {/* System Version Footnote */}
           <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500 px-1 pt-2.5 flex items-center justify-between">
-            <span>NER-LOGIX v2.4.0</span>
+            <span>AshtaMarg v2.4.0</span>
             <span className="text-blue-600 dark:text-cyan-400 font-bold">8 NER STATES</span>
           </div>
         </div>

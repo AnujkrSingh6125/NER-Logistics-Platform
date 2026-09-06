@@ -93,7 +93,7 @@ export default function TacticalAiChatWidget({
   const welcomeMessage = useMemo(() => ({
     id: 'welcome-1',
     role: 'assistant',
-    content: `Hello ${userName}! 👋\nI'm your **NER-LOGIX assistant**. I can help you with route planning, hazard analysis, convoys, weather updates, and more.\n\nHow can I assist you today?`,
+    content: `Hello ${userName}! 👋\nI'm your **AshtaMarg assistant**. I can help you with route planning, hazard analysis, convoys, weather updates, and more.\n\nHow can I assist you today?`,
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   }), [userName]);
 
@@ -475,7 +475,7 @@ export default function TacticalAiChatWidget({
       {
         id: `welcome-${Date.now()}`,
         role: 'assistant',
-        content: `Hello ${userName}! 👋\nI'm your **NER-LOGIX assistant**. I can help you with route planning, hazard analysis, convoys, weather updates, and more.\n\nHow can I assist you today?`,
+        content: `Hello ${userName}! 👋\nI'm your **AshtaMarg assistant**. I can help you with route planning, hazard analysis, convoys, weather updates, and more.\n\nHow can I assist you today?`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       }
     ]);
@@ -494,7 +494,7 @@ export default function TacticalAiChatWidget({
           </div>
           <div>
             <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white leading-tight">
-              NER-LOGIX AI
+              AshtaMarg AI
             </h3>
             <div className="flex items-center space-x-1 leading-tight mt-0.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -568,7 +568,7 @@ export default function TacticalAiChatWidget({
               <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-800 rounded-2xl p-3 text-xs text-slate-700 dark:text-slate-200 leading-relaxed shadow-2xs">
                 <p className="font-semibold text-slate-900 dark:text-white mb-1">Hello {userName}! 👋</p>
                 <p className="mb-2">
-                  I&apos;m your NER-LOGIX assistant. I can help you with route planning, hazard analysis, convoys, weather updates, and more.
+                  I&apos;m your AshtaMarg assistant. I can help you with route planning, hazard analysis, convoys, weather updates, and more.
                 </p>
                 <p className="font-medium text-slate-900 dark:text-white">
                   How can I assist you today?
@@ -619,7 +619,7 @@ export default function TacticalAiChatWidget({
             >
               <div className="flex items-center space-x-1.5 text-[10px] text-slate-400 font-medium px-1 select-none">
                 {!isUser && <Sparkles className="w-3 h-3 text-blue-500" />}
-                <span>{isUser ? 'You' : 'NER-LOGIX AI'}</span>
+                <span>{isUser ? 'You' : 'AshtaMarg AI'}</span>
                 <span>•</span>
                 <span>{msg.timestamp}</span>
               </div>
@@ -771,7 +771,7 @@ export default function TacticalAiChatWidget({
           type="button"
           onClick={() => setIsOpen(true)}
           className="fixed bottom-5 right-5 z-[99999] group w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white flex items-center justify-center shadow-2xl shadow-blue-500/40 border border-white/25 hover:scale-105 active:scale-95 transition-all duration-300 cursor-pointer animate-in fade-in zoom-in-90"
-          title="Open NER-LOGIX AI Copilot"
+          title="Open AshtaMarg AI Copilot"
         >
           <div className="relative flex items-center justify-center">
             <Bot className="w-7 h-7 text-white animate-pulse" />

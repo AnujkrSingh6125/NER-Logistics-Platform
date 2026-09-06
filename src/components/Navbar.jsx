@@ -235,12 +235,10 @@ export default function Navbar() {
           </button>
 
           <Link href="/" className="flex items-center space-x-2.5 group">
-            <div className="w-9 h-9 flex items-center justify-center transition-transform group-hover:scale-105">
-              <MountainLogo className="w-8 h-8" />
-            </div>
+            <MountainLogo className="w-9 h-9 transition-transform group-hover:scale-105" />
             <div className="flex flex-col">
               <span className="text-base font-black tracking-tight text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-cyan-400 transition-colors font-sans">
-                NER-LOGIX
+                AshtaMarg
               </span>
               <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 leading-none">
                 Tactical Logistics • 8 NER States
