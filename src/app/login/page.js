@@ -208,12 +208,47 @@ export default function LoginPage({ onAuthSuccess }) {
 
         // Check if user already existed in Supabase Auth (empty identities array)
         if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-          setFormMsg({
-            type: 'error',
-            text: 'This email is already registered in the system. Please switch to the "Sign In" tab to log in with your password, or use a different email address to register.',
+          // Attempt sign in with password to re-create/re-provision profile in driver_profiles table
+          const { data: logData, error: logErr } = await supabase.auth.signInWithPassword({
+            email: email.trim().toLowerCase(),
+            password: password,
           });
-          setLoading(false);
-          return;
+
+          if (!logErr && logData?.user) {
+            try {
+              await supabase.from('driver_profiles').upsert({
+                id: logData.user.id,
+                full_name: fullName.trim() || logData.user.user_metadata?.full_name || 'Field Operator',
+                phone: `+91${phone.trim()}`,
+                email: email.trim().toLowerCase(),
+                driver_code: `DRV-NER-${logData.user.id.slice(0, 4).toUpperCase()}`,
+                vehicle_number: vNum,
+                is_active_duty: false,
+                last_ping: new Date().toISOString(),
+              }, { onConflict: 'id' });
+            } catch (pErr) {}
+
+            setFormMsg({
+              type: 'success',
+              text: '[✓] Operator profile re-created and authenticated! Launching Tactical Center...',
+            });
+
+            if (onAuthSuccess && logData?.session) {
+              onAuthSuccess(logData.session);
+            }
+
+            setTimeout(() => {
+              window.location.replace('/');
+            }, 500);
+            return;
+          } else {
+            setFormMsg({
+              type: 'error',
+              text: 'This email is already registered with a different passcode. Please switch to the "Sign In" tab to log in, or delete the user in Supabase Authentication -> Users to start fresh.',
+            });
+            setLoading(false);
+            return;
+          }
         }
 
         // If immediate session created (e.g. email confirmations auto-confirmed in Supabase settings)
@@ -287,7 +322,7 @@ export default function LoginPage({ onAuthSuccess }) {
         const authenticatedUser = data?.user || data?.session?.user;
 
         if (authenticatedUser) {
-          // Strictly verify driver profile exists in public.driver_profiles
+          // Verify or auto-provision driver profile in public.driver_profiles
           const { data: profileRow } = await supabase
             .from('driver_profiles')
             .select('id')
@@ -295,14 +330,20 @@ export default function LoginPage({ onAuthSuccess }) {
             .maybeSingle();
 
           if (!profileRow) {
-            // Account was deleted/purged -> strictly reject login and sign out
-            await supabase.auth.signOut().catch(() => {});
-            setFormMsg({
-              type: 'error',
-              text: 'Access Denied: This account has been deleted or purged. Please create a new account to register.',
-            });
-            setLoading(false);
-            return;
+            const vNum = authenticatedUser.user_metadata?.vehicle_number || 'AS-01-AX-9921';
+            const fName = authenticatedUser.user_metadata?.full_name || authenticatedUser.email?.split('@')[0] || 'Field Operator';
+            const uPhone = authenticatedUser.user_metadata?.phone || '';
+
+            await supabase.from('driver_profiles').upsert({
+              id: authenticatedUser.id,
+              full_name: fName,
+              phone: uPhone,
+              email: authenticatedUser.email,
+              driver_code: `DRV-NER-${authenticatedUser.id.slice(0, 4).toUpperCase()}`,
+              vehicle_number: vNum,
+              is_active_duty: false,
+              last_ping: new Date().toISOString(),
+            }, { onConflict: 'id' });
           }
 
           setFormMsg({

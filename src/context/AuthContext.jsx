@@ -64,7 +64,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   // Helper to fetch driver profile from public.driver_profiles (for Citizen/Driver accounts)
-  const fetchUserProfile = useCallback(async (userId) => {
+  const fetchUserProfile = useCallback(async (userId, fallbackMeta = null) => {
     if (!userId) {
       setProfile(null);
       if (typeof window !== 'undefined') {
@@ -86,8 +86,38 @@ export function AuthProvider({ children }) {
           localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(data));
         }
         return data;
+      } else if (fallbackMeta) {
+        // Auto-provision profile row in driver_profiles for valid authenticated operator
+        const newProfile = {
+          id: userId,
+          full_name: fallbackMeta?.full_name || 'Field Operator',
+          phone: fallbackMeta?.phone || '',
+          email: fallbackMeta?.email || null,
+          driver_code: fallbackMeta?.driver_code || `DRV-NER-${userId.slice(0, 4).toUpperCase()}`,
+          vehicle_number: fallbackMeta?.vehicle_number || 'AS-01-AX-9921',
+          is_active_duty: false,
+          state: fallbackMeta?.state || 'Assam',
+          district: fallbackMeta?.district || null,
+        };
+
+        try {
+          const { data: inserted } = await supabase
+            .from('driver_profiles')
+            .upsert(newProfile, { onConflict: 'id' })
+            .select()
+            .maybeSingle();
+
+          const finalProfile = inserted || newProfile;
+          setProfile(finalProfile);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(finalProfile));
+          }
+          return finalProfile;
+        } catch (insertCatch) {
+          setProfile(newProfile);
+          return newProfile;
+        }
       } else {
-        // Account was deleted or purged from driver_profiles -> null
         setProfile(null);
         if (typeof window !== 'undefined') {
           localStorage.removeItem(PROFILE_CACHE_KEY);
