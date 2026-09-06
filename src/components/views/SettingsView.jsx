@@ -37,13 +37,13 @@ export default function SettingsView() {
   const isNodal = isNodalOfficer || profile?.role === 'nodal_officer';
   const displayName = isNodal 
     ? (nodalOfficer?.officer_name || 'State Nodal Authority') 
-    : (profile?.full_name || user?.user_metadata?.full_name || 'Anuj');
+    : (profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Guest Operator');
   
   const rawId = user?.id || profile?.id || nodalOfficer?.id || '';
   const tacticalId = profile?.driver_code 
     || user?.user_metadata?.driver_code 
-    || (rawId ? `OP-NER-${rawId.replace(/-/g, '').slice(0, 8).toUpperCase()}` : 'OP-NER-8F3E2B1A');
-  const fullUuid = rawId || '8f3e2b1a-9921-4d1e-bf11-0c58a9e21012';
+    || (rawId ? `OP-NER-${rawId.replace(/-/g, '').slice(0, 8).toUpperCase()}` : 'GUEST-OP');
+  const fullUuid = rawId || 'N/A';
 
   const copyToClipboard = (text) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -171,7 +171,7 @@ export default function SettingsView() {
               <div className="flex justify-between items-center py-2.5 border-b border-slate-100 dark:border-slate-800">
                 <span className="text-slate-500">Vehicle Registration:</span>
                 <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                  {profile?.vehicle_number || user?.user_metadata?.vehicle_number || 'WB1995'}
+                  {profile?.vehicle_number || user?.user_metadata?.vehicle_number || 'Not Registered'}
                 </span>
               </div>
             ) : (

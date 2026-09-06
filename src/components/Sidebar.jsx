@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useNav } from '@/context/NavContext';
 import { useAuth } from '@/context/AuthContext';
@@ -16,7 +17,8 @@ import {
   Check,
   Shield,
   LogOut,
-  Loader2
+  Loader2,
+  User
 } from 'lucide-react';
 import MountainLogo from '@/components/MountainLogo';
 
@@ -54,14 +56,15 @@ export default function Sidebar({
   const onSelectTab = propOnSelectTab || setCurrentView;
 
   const isNodal = isNodalOfficer || userProfile?.role === 'nodal_officer' || profile?.role === 'nodal_officer';
+  const isAuthenticated = Boolean(user || nodalOfficer || profile);
 
   // Determine display identity
   const displayName = isNodal 
     ? (nodalOfficer?.officer_name || userProfile?.full_name || 'Nodal Authority')
-    : (profile?.full_name || user?.user_metadata?.full_name || userProfile?.full_name || user?.email?.split('@')[0] || 'Anuj');
+    : (profile?.full_name || user?.user_metadata?.full_name || userProfile?.full_name || user?.email?.split('@')[0] || 'Guest Operator');
 
   const displayRole = isNodal ? 'Nodal Officer' : 'Field Operator';
-  const userInitial = displayName.charAt(0).toUpperCase() || 'A';
+  const userInitial = isAuthenticated ? (displayName.charAt(0).toUpperCase() || 'O') : 'G';
 
   const rawId = user?.id || profile?.id || nodalOfficer?.id || userProfile?.id || '';
   
@@ -69,14 +72,14 @@ export default function Sidebar({
   const uniqueTacticalId = profile?.driver_code 
     || user?.user_metadata?.driver_code 
     || userProfile?.driver_code 
-    || (rawId ? `OP-NER-${rawId.replace(/-/g, '').slice(0, 8).toUpperCase()}` : 'OP-NER-8F3E2B1A');
+    || (rawId ? `OP-NER-${rawId.replace(/-/g, '').slice(0, 8).toUpperCase()}` : 'GUEST-OP');
   
-  const fullUuid = rawId || '8f3e2b1a-9921-4d1e-bf11-0c58a9e21012';
+  const fullUuid = rawId || 'N/A';
 
-  const userEmail = user?.email || nodalOfficer?.email || profile?.email || userProfile?.email || 'singhanuj6125@gmail.com';
-  const vehiclePlate = profile?.vehicle_number || user?.user_metadata?.vehicle_number || userProfile?.vehicle_number || 'WB1995';
-  const rawPhone = profile?.phone || user?.user_metadata?.phone || nodalOfficer?.phone || userProfile?.phone || '9435010001';
-  const userPhone = rawPhone.startsWith('+91') ? rawPhone : `+91 ${rawPhone}`;
+  const userEmail = user?.email || nodalOfficer?.email || profile?.email || userProfile?.email || 'Not Authenticated';
+  const vehiclePlate = profile?.vehicle_number || user?.user_metadata?.vehicle_number || userProfile?.vehicle_number || '';
+  const rawPhone = profile?.phone || user?.user_metadata?.phone || nodalOfficer?.phone || userProfile?.phone || '';
+  const userPhone = rawPhone ? (rawPhone.startsWith('+91') ? rawPhone : `+91 ${rawPhone}`) : 'Not Provided';
 
   const copyToClipboard = (text) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -202,40 +205,63 @@ export default function Sidebar({
           </div>
         </div>
 
-        {/* COMPACT ACCOUNT ICON TRIGGER BUTTON */}
+        {/* COMPACT ACCOUNT TRIGGER BUTTON / SIGN IN */}
         <div className="mt-auto pt-3 border-t border-slate-200 dark:border-slate-800">
-          <button
-            type="button"
-            onClick={() => setShowAccountModal(true)}
-            className="w-full p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950/80 hover:bg-slate-100 dark:hover:bg-slate-800/80 border border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 flex items-center justify-between gap-3 transition-all group text-left cursor-pointer shadow-2xs"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              {/* Account Symbol / Avatar */}
-              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs font-mono uppercase shrink-0 shadow-xs ${
-                isNodal 
-                  ? 'bg-amber-500 text-slate-950' 
-                  : 'bg-blue-600 dark:bg-cyan-500 text-white dark:text-slate-950'
-              }`}>
-                {userInitial}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-slate-900 dark:text-white truncate leading-tight group-hover:text-blue-600 dark:group-hover:text-cyan-400 transition-colors">
-                  {displayName}
-                </p>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-[9px] font-mono text-slate-500 dark:text-slate-400 uppercase tracking-wide truncate">
-                    {isNodal ? 'Nodal Officer' : 'Field Operator'}
-                  </span>
-                  {!isNodal && vehiclePlate && (
-                    <span className="text-[9px] font-mono text-blue-600 dark:text-cyan-400 font-bold">
-                      • {vehiclePlate}
+          {isAuthenticated ? (
+            <button
+              type="button"
+              onClick={() => setShowAccountModal(true)}
+              className="w-full p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-950/80 hover:bg-slate-100 dark:hover:bg-slate-800/80 border border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 flex items-center justify-between gap-3 transition-all group text-left cursor-pointer shadow-2xs"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                {/* Account Symbol / Avatar */}
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs font-mono uppercase shrink-0 shadow-xs ${
+                  isNodal 
+                    ? 'bg-amber-500 text-slate-950' 
+                    : 'bg-blue-600 dark:bg-cyan-500 text-white dark:text-slate-950'
+                }`}>
+                  {userInitial}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-900 dark:text-white truncate leading-tight group-hover:text-blue-600 dark:group-hover:text-cyan-400 transition-colors">
+                    {displayName}
+                  </p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[9px] font-mono text-slate-500 dark:text-slate-400 uppercase tracking-wide truncate">
+                      {isNodal ? 'Nodal Officer' : 'Field Operator'}
                     </span>
-                  )}
+                    {!isNodal && vehiclePlate && (
+                      <span className="text-[9px] font-mono text-blue-600 dark:text-cyan-400 font-bold">
+                        • {vehiclePlate}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 group-hover:text-slate-700 dark:group-hover:text-white transition-all shrink-0"/>
-          </button>
+              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 group-hover:text-slate-700 dark:group-hover:text-white transition-all shrink-0"/>
+            </button>
+          ) : (
+            <Link
+              href="/login"
+              onClick={onClose}
+              className="w-full p-2.5 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white flex items-center justify-between gap-3 transition-all group text-left cursor-pointer shadow-md shadow-blue-500/20"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center font-bold text-xs font-mono shrink-0">
+                  <User className="w-4 h-4 text-white" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-white truncate leading-tight">
+                    Sign In / Register
+                  </p>
+                  <p className="text-[10px] text-white/80 leading-tight">
+                    Access tactical routing & logs
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-white/80 group-hover:translate-x-0.5 transition-transform shrink-0" />
+            </Link>
+          )}
 
           {/* System Version Footnote */}
           <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500 px-1 pt-2.5 flex items-center justify-between">

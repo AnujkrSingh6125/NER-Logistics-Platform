@@ -24,6 +24,7 @@ import {
 import MountainLogo from '@/components/MountainLogo';
 import ThemeToggle from '@/components/ThemeToggle';
 import AuthNavbarSwitcher from '@/components/AuthNavbarSwitcher';
+import AccountMenu from '@/components/AccountMenu';
 import { useNav } from '@/context/NavContext';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -360,6 +361,11 @@ export default function Navbar() {
               </div>
             )}
           </div>
+
+          {/* If Authenticated: Show Profile & Account Menu */}
+          {!authLoading && (user || isNodalOfficer) && pathname !== '/login' && pathname !== '/nodal-login' && (
+            <AccountMenu />
+          )}
 
           {/* Auth Switcher (On login pages or when unauthenticated) */}
           {(pathname === '/login' || pathname === '/nodal-login' || (!authLoading && !user && !isNodalOfficer)) && (

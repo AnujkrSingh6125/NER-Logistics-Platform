@@ -103,10 +103,10 @@ export default function StartJourneyModal({
   if (!isOpen) return null;
 
   // Resolve Driver Details (Read-only Auto-populated)
-  const driverName = profile?.full_name || user?.user_metadata?.full_name || (user?.email ? user.email.split('@')[0] : 'anuj');
-  const driverPhone = profile?.phone || user?.user_metadata?.phone || '+91 6294913005';
-  const driverCode = profile?.driver_code || `DRV-NER-${user?.id ? user.id.slice(0, 4).toUpperCase() : '9C88'}`;
-  const vehicleNumber = profile?.vehicle_number || user?.user_metadata?.vehicle_number || 'WB1995';
+  const driverName = profile?.full_name || user?.user_metadata?.full_name || (user?.email ? user.email.split('@')[0] : 'Operator');
+  const driverPhone = profile?.phone || user?.user_metadata?.phone || 'Not Provided';
+  const driverCode = profile?.driver_code || (user?.id ? `DRV-NER-${user.id.slice(0, 4).toUpperCase()}` : 'DRV-NER-PENDING');
+  const vehicleNumber = profile?.vehicle_number || user?.user_metadata?.vehicle_number || 'Pending Assignment';
 
   // Handle Form Submission
   const handleSubmit = async (e) => {

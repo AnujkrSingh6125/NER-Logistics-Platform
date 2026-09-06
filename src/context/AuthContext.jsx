@@ -82,20 +82,6 @@ export function AuthProvider({ children }) {
 
       if (error) {
         console.warn('Query error on driver_profiles:', error.message);
-        if (typeof window !== 'undefined') {
-          const cached = localStorage.getItem(PROFILE_CACHE_KEY);
-          if (cached) {
-            try {
-              const parsed = JSON.parse(cached);
-              if (parsed.id === userId) {
-                setProfile(parsed);
-                return parsed;
-              }
-            } catch (e) {
-              console.error('Failed to parse cached profile', e);
-            }
-          }
-        }
       }
 
       if (data) {
@@ -105,40 +91,16 @@ export function AuthProvider({ children }) {
         }
         return data;
       } else {
-        // Auto-provision profile row in public.driver_profiles database table if missing
-        const newProfile = {
-          id: userId,
-          full_name: fallbackMeta?.full_name || 'Field Operator',
-          phone: fallbackMeta?.phone || '',
-          email: fallbackMeta?.email || null,
-          driver_code: fallbackMeta?.driver_code || `DRV-NER-${userId.slice(0, 4).toUpperCase()}`,
-          vehicle_number: fallbackMeta?.vehicle_number || 'AS-01-AX-9921',
-          is_active_duty: false,
-          state: fallbackMeta?.state || 'Assam',
-          district: fallbackMeta?.district || null,
-        };
-
-        try {
-          const { data: inserted } = await supabase
-            .from('driver_profiles')
-            .upsert(newProfile, { onConflict: 'id' })
-            .select()
-            .maybeSingle();
-
-          const finalProfile = inserted || newProfile;
-          setProfile(finalProfile);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(finalProfile));
-          }
-          return finalProfile;
-        } catch (insertCatch) {
-          console.warn('Fallback driver_profiles upsert:', insertCatch);
-          setProfile(newProfile);
-          return newProfile;
+        // No record exists in driver_profiles (account deleted or not registered)
+        setProfile(null);
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(PROFILE_CACHE_KEY);
         }
+        return null;
       }
     } catch (err) {
       console.error('Error in fetchUserProfile:', err);
+      setProfile(null);
     }
     return null;
   }, []);
@@ -147,61 +109,73 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true;
 
-    // 1. Check for cached nodal officer session first
-    if (typeof window !== 'undefined') {
-      try {
-        const cachedNodal = localStorage.getItem(NODAL_CACHE_KEY);
-        if (cachedNodal) {
-          const parsedNodal = JSON.parse(cachedNodal);
-          if (parsedNodal?.email) {
-            setNodalOfficer(parsedNodal);
-            currentUserIdRef.current = parsedNodal.id;
-            setUser({
-              id: parsedNodal.id,
-              email: parsedNodal.email,
-              isNodal: true,
-              user_metadata: {
-                full_name: parsedNodal.officer_name,
-                role: 'nodal_officer',
-                state: parsedNodal.state,
-              },
-            });
-            setProfile({
-              id: parsedNodal.id,
-              full_name: parsedNodal.officer_name,
-              role: 'nodal_officer',
-              state: parsedNodal.state,
-              department: parsedNodal.department,
-              phone: parsedNodal.emergency_contact,
-            });
-          }
-        }
-
-        const cachedProfile = localStorage.getItem(PROFILE_CACHE_KEY);
-        if (cachedProfile && !cachedNodal) {
-          setProfile(JSON.parse(cachedProfile));
-        }
-      } catch (e) {
-        // ignore cache parse errors
-      }
-    }
-
     async function initAuth() {
       try {
-        const { data: { session: initialSession }, error } = await supabase.auth.getSession();
-        if (error) throw error;
+        // 1. Check for cached nodal officer session first
+        if (typeof window !== 'undefined') {
+          const cachedNodal = localStorage.getItem(NODAL_CACHE_KEY);
+          if (cachedNodal) {
+            try {
+              const parsedNodal = JSON.parse(cachedNodal);
+              if (parsedNodal?.email) {
+                setNodalOfficer(parsedNodal);
+                currentUserIdRef.current = parsedNodal.id;
+                setUser({
+                  id: parsedNodal.id,
+                  email: parsedNodal.email,
+                  isNodal: true,
+                  user_metadata: {
+                    full_name: parsedNodal.officer_name,
+                    role: 'nodal_officer',
+                    state: parsedNodal.state,
+                  },
+                });
+                setProfile({
+                  id: parsedNodal.id,
+                  full_name: parsedNodal.officer_name,
+                  role: 'nodal_officer',
+                  state: parsedNodal.state,
+                  department: parsedNodal.department,
+                  phone: parsedNodal.emergency_contact,
+                });
+                return;
+              }
+            } catch (e) {}
+          }
+        }
+
+        // 2. Validate with Supabase server whether user session is truly valid
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+
+        if (userError || !userData?.user) {
+          // User was deleted from Supabase Auth or has no valid token
+          currentUserIdRef.current = null;
+          setUser(null);
+          setSession(null);
+          setProfile(null);
+          setNodalOfficer(null);
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(PROFILE_CACHE_KEY);
+            localStorage.removeItem(NODAL_CACHE_KEY);
+          }
+          return;
+        }
+
+        const validUser = userData.user;
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
 
         if (mounted) {
-          const cachedNodal = typeof window !== 'undefined' ? localStorage.getItem(NODAL_CACHE_KEY) : null;
-          if (!cachedNodal && initialSession?.user) {
-            currentUserIdRef.current = initialSession.user.id;
-            setSession(initialSession);
-            setUser(initialSession.user);
-            await fetchUserProfile(initialSession.user.id, initialSession.user.user_metadata);
-          }
+          currentUserIdRef.current = validUser.id;
+          setSession(currentSession);
+          setUser(validUser);
+          await fetchUserProfile(validUser.id, validUser.user_metadata);
         }
       } catch (err) {
         console.error('Error initializing session:', err);
+        currentUserIdRef.current = null;
+        setUser(null);
+        setSession(null);
+        setProfile(null);
       } finally {
         if (mounted) {
           setLoading(false);
