@@ -206,25 +206,81 @@ export default function LoginPage({ onAuthSuccess }) {
           return;
         }
 
+        // Check if user already existed in Supabase Auth (empty identities array)
+        if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          // Attempt sign in with password to restore/re-provision profile
+          const { data: logData, error: logErr } = await supabase.auth.signInWithPassword({
+            email: email.trim().toLowerCase(),
+            password: password,
+          });
+
+          if (!logErr && logData?.user) {
+            try {
+              await supabase.from('driver_profiles').upsert({
+                id: logData.user.id,
+                full_name: fullName.trim() || logData.user.user_metadata?.full_name || 'Field Operator',
+                phone: `+91${phone.trim()}`,
+                email: email.trim().toLowerCase(),
+                driver_code: `DRV-NER-${logData.user.id.slice(0, 4).toUpperCase()}`,
+                vehicle_number: vNum,
+                is_active_duty: false,
+                last_ping: new Date().toISOString(),
+              }, { onConflict: 'id' });
+            } catch (pErr) {}
+
+            setFormMsg({
+              type: 'success',
+              text: '[✓] Operator authenticated! Launching Tactical Center...',
+            });
+
+            if (onAuthSuccess && logData?.session) {
+              onAuthSuccess(logData.session);
+            }
+
+            setTimeout(() => {
+              window.location.replace('/');
+            }, 500);
+            return;
+          } else {
+            setFormMsg({
+              type: 'error',
+              text: 'This email is already registered in the system. Please switch to the Sign In tab and log in.',
+            });
+            setLoading(false);
+            return;
+          }
+        }
+
         // If immediate session created (e.g. email confirmations auto-confirmed)
-        if (data?.session) {
+        if (data?.session && data?.user) {
+          try {
+            await supabase.from('driver_profiles').upsert({
+              id: data.user.id,
+              full_name: fullName.trim(),
+              phone: `+91${phone.trim()}`,
+              email: email.trim().toLowerCase(),
+              driver_code: `DRV-NER-${data.user.id.slice(0, 4).toUpperCase()}`,
+              vehicle_number: vNum,
+              is_active_duty: false,
+              last_ping: new Date().toISOString(),
+            }, { onConflict: 'id' });
+          } catch (pErr) {}
+
           setFormMsg({
             type: 'success',
             text: '[✓] Operator registered & authenticated! Launching Tactical Center...',
           });
 
-          // 1. Notify parent AuthGuard if passed as a prop
           if (onAuthSuccess) {
             onAuthSuccess(data.session);
           }
 
-          // 2. Perform a clean hard redirect to clear auth component state and hydrate dashboard
           setTimeout(() => {
             window.location.replace('/');
           }, 500);
           return;
         } else {
-          // Seamlessly transition into the 6-Digit Email Verification Screen
+          // Transition into the 6-Digit Email Verification Screen
           setIsVerifyingOtp(true);
           setCountdown(60);
           setCanResend(false);
@@ -251,7 +307,7 @@ export default function LoginPage({ onAuthSuccess }) {
           if (error.message?.toLowerCase().includes('email not confirmed') || error.message?.toLowerCase().includes('not confirmed')) {
             setFormMsg({
               type: 'error',
-              text: 'Email not verified. Please verify your email to activate access.',
+              text: 'Email not verified. Please verify your email or re-register to activate access.',
             });
           } else {
             setFormMsg({
@@ -266,26 +322,32 @@ export default function LoginPage({ onAuthSuccess }) {
         const authenticatedUser = data?.user || data?.session?.user;
 
         if (authenticatedUser) {
-          // Verify that this user's profile actually exists in public.driver_profiles
-          const { data: profileRow, error: profileErr } = await supabase
-            .from('driver_profiles')
-            .select('id, full_name, email')
-            .eq('id', authenticatedUser.id)
-            .maybeSingle();
+          // Ensure driver profile exists in public.driver_profiles (auto-heal if missing)
+          try {
+            const { data: profileRow } = await supabase
+              .from('driver_profiles')
+              .select('id')
+              .eq('id', authenticatedUser.id)
+              .maybeSingle();
 
-          if (profileErr || !profileRow) {
-            // Account was deleted in Supabase Table Editor or purged
-            await supabase.auth.signOut().catch(() => {});
-            if (typeof window !== 'undefined') {
-              localStorage.clear();
-              sessionStorage.clear();
+            if (!profileRow) {
+              const vNum = authenticatedUser.user_metadata?.vehicle_number || 'AS-01-AX-9921';
+              const fName = authenticatedUser.user_metadata?.full_name || authenticatedUser.email?.split('@')[0] || 'Field Operator';
+              const uPhone = authenticatedUser.user_metadata?.phone || '';
+
+              await supabase.from('driver_profiles').upsert({
+                id: authenticatedUser.id,
+                full_name: fName,
+                phone: uPhone,
+                email: authenticatedUser.email,
+                driver_code: `DRV-NER-${authenticatedUser.id.slice(0, 4).toUpperCase()}`,
+                vehicle_number: vNum,
+                is_active_duty: false,
+                last_ping: new Date().toISOString(),
+              }, { onConflict: 'id' });
             }
-            setFormMsg({
-              type: 'error',
-              text: 'Access Denied: This account has been deleted or purged. Please register for a new account.',
-            });
-            setLoading(false);
-            return;
+          } catch (healErr) {
+            console.warn('Driver profile restore notice:', healErr);
           }
 
           setFormMsg({
