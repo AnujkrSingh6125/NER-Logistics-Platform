@@ -218,6 +218,9 @@ export default function Navbar() {
     }
   };
 
+  const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/nodal-login');
+  if (isAuthPage) return null;
+
   return (
     <header className="sticky top-0 z-[1100] bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-b border-slate-200/90 dark:border-slate-800/90 h-16 transition-colors shadow-2xs select-none">
       <div className="h-full px-4 sm:px-6 flex items-center justify-between gap-4">
