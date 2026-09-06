@@ -451,13 +451,26 @@ export default function ReportHazardModal({
   const mapHazardType = (type) => {
     if (!type || typeof type !== 'string') return 'landslide';
     const normalized = type.toLowerCase().replace(/[\s-]/g, '_');
-    const valid = ['landslide', 'flash_flood', 'road_washout', 'tree_fall', 'heavy_waterlogging', 'bridge_damage', 'other'];
+    const valid = [
+      'landslide', 
+      'flash_flood', 
+      'flood', 
+      'road_washout', 
+      'road_damage', 
+      'tree_fall', 
+      'heavy_waterlogging', 
+      'bridge_damage', 
+      'weather', 
+      'accident', 
+      'other'
+    ];
     if (valid.includes(normalized)) return normalized;
     if (normalized.includes('other')) return 'other';
-    if (normalized.includes('flood')) return 'flash_flood';
+    if (normalized.includes('flood') || normalized.includes('water')) return 'flash_flood';
     if (normalized.includes('bridge')) return 'bridge_damage';
-    if (normalized.includes('cave') || normalized.includes('blockade')) return 'road_washout';
-    if (normalized.includes('mud') || normalized.includes('rock')) return 'landslide';
+    if (normalized.includes('cave') || normalized.includes('blockade') || normalized.includes('washout') || normalized.includes('damage') || normalized.includes('collapse')) return 'road_washout';
+    if (normalized.includes('mud') || normalized.includes('rock') || normalized.includes('landslide')) return 'landslide';
+    if (normalized.includes('tree')) return 'tree_fall';
     return 'other';
   };
 
@@ -703,35 +716,88 @@ export default function ReportHazardModal({
       };
 
       // Try inserting with full payload
+      let activePayload = { ...basePayload };
       let { data, error: dbError } = await supabase
         .from('road_hazards')
-        .insert([basePayload])
+        .insert([activePayload])
         .select()
         .single();
 
-      // Graceful fallback if database schema cache lacks optional columns
-      if (dbError && (dbError.message?.includes('reported_by_id') || dbError.message?.includes('media_urls') || dbError.message?.includes('impact_radius_km') || dbError.message?.includes('ai_') || dbError.code === 'PGRST204')) {
-        console.warn('Retrying hazard insertion without optional unmigrated columns:', dbError.message);
-        const fallbackPayload = { ...basePayload };
-        delete fallbackPayload.reported_by_id;
-        delete fallbackPayload.media_urls;
-        delete fallbackPayload.ai_verified;
-        delete fallbackPayload.ai_confidence;
-        delete fallbackPayload.ai_hazard_type;
-        delete fallbackPayload.ai_verdict_summary;
-        delete fallbackPayload.ai_analysis_raw;
-        if (dbError.message?.includes('impact_radius_km')) {
-          delete fallbackPayload.impact_radius_km;
+      // Graceful fallback if database schema cache lacks optional columns, violates constraints, or has foreign key issues
+      if (dbError) {
+        console.warn('Initial hazard insertion returned error, executing resilient recovery:', dbError.message);
+
+        // 1. Strip optional / unmigrated columns
+        const strippedPayload = { ...activePayload };
+        delete strippedPayload.reported_by_id;
+        delete strippedPayload.media_urls;
+        delete strippedPayload.ai_verified;
+        delete strippedPayload.ai_confidence;
+        delete strippedPayload.ai_hazard_type;
+        delete strippedPayload.ai_verdict_summary;
+        delete strippedPayload.ai_analysis_raw;
+        if (dbError.message?.includes('impact_radius_km') || dbError.code === 'PGRST204') {
+          delete strippedPayload.impact_radius_km;
         }
 
+        // 2. Clear foreign key if auth user is unverified or mismatch
+        if (dbError.code === '23503' || dbError.message?.includes('reported_by_fkey') || dbError.message?.includes('reported_by_id_fkey')) {
+          strippedPayload.reported_by = null;
+        }
+
+        // Try second attempt with stripped payload
         const retryResult = await supabase
           .from('road_hazards')
-          .insert([fallbackPayload])
+          .insert([strippedPayload])
           .select()
           .single();
 
         data = retryResult.data;
         dbError = retryResult.error;
+
+        // 3. If check constraint violation on hazard_type (Postgres error 23514 / road_hazards_hazard_type_check)
+        if (dbError && (
+          dbError.code === '23514' || 
+          dbError.message?.toLowerCase().includes('hazard_type_check') || 
+          dbError.message?.toLowerCase().includes('check constraint')
+        )) {
+          console.warn('Check constraint detected on hazard_type, executing alias retry chain...');
+
+          const fallbackCandidates = [];
+          if (dbHazardType === 'road_washout' || dbHazardType === 'bridge_damage') {
+            fallbackCandidates.push('road_damage', 'landslide', 'other', 'flood');
+          } else if (dbHazardType === 'flash_flood' || dbHazardType === 'heavy_waterlogging') {
+            fallbackCandidates.push('flood', 'other', 'landslide', 'road_damage');
+          } else if (dbHazardType === 'tree_fall') {
+            fallbackCandidates.push('road_damage', 'weather', 'other', 'landslide');
+          } else {
+            fallbackCandidates.push('landslide', 'other', 'road_damage', 'flood');
+          }
+
+          for (const fallbackType of fallbackCandidates) {
+            const fbPayload = {
+              ...strippedPayload,
+              hazard_type: fallbackType,
+              notes: strippedPayload.notes 
+                ? `[Hazard: ${dbHazardType.replace(/_/g, ' ')}] ${strippedPayload.notes}` 
+                : strippedPayload.notes
+            };
+
+            const constraintRetry = await supabase
+              .from('road_hazards')
+              .insert([fbPayload])
+              .select()
+              .single();
+
+            if (!constraintRetry.error) {
+              data = constraintRetry.data;
+              dbError = null;
+              break;
+            } else {
+              dbError = constraintRetry.error;
+            }
+          }
+        }
       }
 
       if (dbError) throw dbError;

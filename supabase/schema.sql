@@ -176,6 +176,48 @@ ALTER TABLE public.road_hazards
     DROP CONSTRAINT IF EXISTS road_hazards_reported_by_fkey,
     DROP CONSTRAINT IF EXISTS road_hazards_reported_by_id_fkey;
 
+-- Ensure road_hazards_hazard_type_check is flexible and case-insensitive
+ALTER TABLE public.road_hazards 
+    DROP CONSTRAINT IF EXISTS road_hazards_hazard_type_check;
+
+ALTER TABLE public.road_hazards 
+    ADD CONSTRAINT road_hazards_hazard_type_check 
+    CHECK (
+        LOWER(hazard_type) IN (
+            'landslide',
+            'flash_flood',
+            'flood',
+            'road_washout',
+            'road_damage',
+            'tree_fall',
+            'heavy_waterlogging',
+            'bridge_damage',
+            'weather',
+            'accident',
+            'other'
+        )
+    );
+
+-- Ensure severity check is flexible and case-insensitive
+ALTER TABLE public.road_hazards 
+    DROP CONSTRAINT IF EXISTS road_hazards_severity_check;
+
+ALTER TABLE public.road_hazards 
+    ADD CONSTRAINT road_hazards_severity_check 
+    CHECK (
+        LOWER(severity) IN ('low', 'medium', 'high', 'critical')
+    );
+
+-- Ensure status check is flexible and case-insensitive
+ALTER TABLE public.road_hazards 
+    DROP CONSTRAINT IF EXISTS road_hazards_status_check;
+
+ALTER TABLE public.road_hazards 
+    ADD CONSTRAINT road_hazards_status_check 
+    CHECK (
+        LOWER(status) IN ('reported', 'verified', 'resolved')
+    );
+
 -- Sync reported_by_id from reported_by if null on legacy rows
 UPDATE public.road_hazards 
 SET reported_by_id = reported_by 
