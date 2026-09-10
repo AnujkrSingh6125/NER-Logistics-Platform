@@ -226,54 +226,15 @@ export async function calculateSafestMultiRoutes(startCoords, endCoords, activeH
     console.warn('Dexie offline cache lookup error:', dbErr);
   }
 
-  // Geodesic Vector fallback
-  const directDist = getDistanceKm(sLat, sLng, eLat, eLng);
-  const directDistKm = parseFloat(directDist.toFixed(1));
-  const directDur = Math.round((directDistKm / 45) * 60);
-
-  const fallbackRoute = {
-    id: 'corridor-offline-vector',
-    index: 0,
-    name: 'Primary: Direct Vector Corridor (Offline)',
-    summary: 'Direct Vector Corridor (Offline Mode)',
-    corridorName: 'Direct Vector Corridor',
-    coordinates: [[sLat, sLng], [eLat, eLng]],
-    anchorPoint: [(sLat + eLat) / 2, (sLng + eLng) / 2],
-    midpoint: [(sLat + eLat) / 2, (sLng + eLng) / 2],
-    distanceKm: directDistKm,
-    durationMin: directDur,
-    durationSeconds: directDur * 60,
-    durationText: formatTransitDuration(directDur * 60, directDistKm),
-    hazardCount: 0,
-    hazardScore: 0,
-    riskScore: 0,
-    sciScore: 10,
-    weather: {
-      maxRainfallMm: 0,
-      avgTemperature: 24,
-      dominantWeather: 'Clear Sky (Offline)',
-      weatherEmoji: '☀️',
-      weatherRiskScore: 0,
-      riskTier: 'safe',
-      alertMessage: 'Offline mode active.',
-    },
-    flaggedHazards: [],
-    safetyStatus: 'optimal',
-    safetyLabel: 'Safest Corridor (0 Hazards)',
-    tag: 'SHORTEST & SAFEST',
-    primaryTag: 'SHORTEST & SAFEST',
-    isPrimary: true,
-    isRecommendedSafest: true,
-    isOfflineCached: true,
-  };
-
+  // If NOT in cache and offline (or online routing failed with no cache):
+  // Strictly do NOT generate fake curves or synthetic estimation.
   return {
-    success: true,
-    allRoutes: [fallbackRoute],
-    rankedRoutes: [fallbackRoute],
-    recommendedRoute: fallbackRoute,
-    safestRouteIndex: 0,
-    isOfflineCached: true,
+    success: false,
+    isOfflineUncached: true,
+    error: 'Offline Notice: Road corridor geometry is not cached on this device. Please connect to internet once to calculate & cache this route.',
+    allRoutes: [],
+    rankedRoutes: [],
+    recommendedRoute: null,
   };
 }
 

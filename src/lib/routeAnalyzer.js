@@ -532,69 +532,9 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
     }
   }
 
-  // 5. If STILL only 1 route (or network offline), generate geometric highway alternative
-  if (validatedRaw.length === 1) {
-    const primary = validatedRaw[0];
-    const curvedCoords = [];
-    const steps = 30;
-
-    for (let i = 0; i <= steps; i++) {
-      const fraction = i / steps;
-      const lat = sLat + (eLat - sLat) * fraction;
-      const lng = sLng + (eLng - sLng) * fraction;
-      const deviation = Math.sin(fraction * Math.PI) * 0.14;
-      curvedCoords.push([lat + deviation * 0.4, lng + deviation]);
-    }
-
-    const closedCoords = ensurePolylineEndpoints(curvedCoords, [sLat, sLng], [eLat, eLng]);
-    const altDist = parseFloat((primary.distKm * 1.08).toFixed(1));
-    const altDur = Math.round(primary.durationMin * 1.15);
-
-    validatedRaw.push({
-      coords: closedCoords,
-      distKm: altDist,
-      durationMin: altDur,
-      summary: 'Alternative Highway Bypass',
-    });
-  } else if (validatedRaw.length === 0) {
-    // Total offline vector fallback
-    const directDistKm = parseFloat(directDist.toFixed(1));
-    const directDur = Math.round((directDistKm / 50) * 60);
-
-    return [{
-      id: 'corridor-fallback',
-      index: 0,
-      name: 'Primary: Direct Vector Corridor',
-      summary: 'Direct Vector Corridor',
-      corridorName: 'Direct Vector Corridor',
-      coordinates: [[sLat, sLng], [eLat, eLng]],
-      anchorPoint: [(sLat + eLat) / 2, (sLng + eLng) / 2],
-      midpoint: [(sLat + eLat) / 2, (sLng + eLng) / 2],
-      distanceKm: directDistKm,
-      durationMin: directDur,
-      durationSeconds: directDur * 60,
-      durationText: formatTransitDuration(directDur),
-      hazardCount: 0,
-      hazardScore: 0,
-      riskScore: 0,
-      sciScore: 10,
-      weather: {
-        maxRainfallMm: 0,
-        avgTemperature: 24,
-        dominantWeather: 'Clear Sky',
-        weatherEmoji: '☀️',
-        weatherRiskScore: 0,
-        riskTier: 'safe',
-        alertMessage: 'Offline mode active. Road conditions normal.',
-      },
-      flaggedHazards: [],
-      safetyStatus: 'optimal',
-      safetyLabel: 'Safest Corridor (0 Hazards)',
-      tag: 'SHORTEST & SAFEST',
-      primaryTag: 'SHORTEST & SAFEST',
-      isPrimary: true,
-      isRecommendedSafest: true,
-    }];
+  // 5. If no routes were returned by online routing engine, return empty list
+  if (validatedRaw.length === 0) {
+    return [];
   }
 
   // 6. Fetch Live Weather Intelligence in parallel for each candidate corridor

@@ -365,24 +365,28 @@ export default function TacticalRoutingMapInner({
           )}
 
           {/* 2. Inner Glowing Core Polyline */}
-          {routeData?.coordinates && (
-            <Polyline
-              positions={routeData.coordinates}
-              pathOptions={{
-                color: '#10b981',
-                weight: 4,
-                opacity: 0.95,
-                dashArray: routeData.isFallback ? '6, 8' : undefined,
-              }}
-            >
-              <Tooltip sticky>
-                <div className="bg-slate-950 text-slate-100 font-mono text-[11px] p-1.5 rounded border border-slate-700">
-                  <div className="font-bold text-cyan-300">Convoy Transit Corridor</div>
-                  <div>Distance: {routeData.distanceKm} km • Est: {routeData.durationText}</div>
-                </div>
-              </Tooltip>
-            </Polyline>
-          )}
+          {routeData?.coordinates && (() => {
+            const sci = routeData.sciScore ?? 10;
+            const coreColor = sci < 25 ? '#10b981' : sci < 50 ? '#f59e0b' : '#ef4444';
+            return (
+              <Polyline
+                positions={routeData.coordinates}
+                pathOptions={{
+                  color: coreColor,
+                  weight: 4,
+                  opacity: 0.95,
+                  dashArray: routeData.isFallback ? '6, 8' : undefined,
+                }}
+              >
+                <Tooltip sticky>
+                  <div className="bg-slate-950 text-slate-100 font-mono text-[11px] p-1.5 rounded border border-slate-700">
+                    <div className="font-bold text-cyan-300">Convoy Transit Corridor (SCI: {sci}/100)</div>
+                    <div>Distance: {routeData.distanceKm} km • Est: {routeData.durationText}</div>
+                  </div>
+                </Tooltip>
+              </Polyline>
+            );
+          })()}
 
           {/* 3. Origin Depot Custom Marker */}
           {originHub && (

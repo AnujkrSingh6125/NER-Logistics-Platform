@@ -21,6 +21,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
+import { db } from '@/lib/offlineDb';
 import { useAuth } from '@/context/AuthContext';
 import LiveClockWidget from '@/components/LiveClockWidget';
 
@@ -32,7 +33,14 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [actionNotice, setActionNotice] = useState(null);
 
-  // Core fetch function with resilient fallback to localStorage active journey
+  // Sync prop changes from parent
+  useEffect(() => {
+    if (shipments && Array.isArray(shipments)) {
+      setLiveShipments(shipments);
+    }
+  }, [shipments]);
+
+  // Core fetch function with resilient fallback to Dexie offline queue & localStorage active journey
   const fetchShipments = useCallback(async (isManual = false) => {
     if (isManual) setIsRefreshing(true);
 
@@ -43,6 +51,18 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         .order('created_at', { ascending: false });
 
       let combined = Array.isArray(data) ? [...data] : [];
+
+      // Check Dexie IndexedDB for offline queued shipments
+      try {
+        const offlineShipments = await db.offline_shipment_queue.where('synced').equals(0).toArray();
+        if (Array.isArray(offlineShipments) && offlineShipments.length > 0) {
+          offlineShipments.forEach(offS => {
+            if (!combined.some(s => s.tracking_code === offS.tracking_code || (offS.id && s.id === offS.id))) {
+              combined.unshift(offS);
+            }
+          });
+        }
+      } catch (e) {}
 
       // Check localStorage for any local active journey not yet in database
       if (typeof window !== 'undefined') {
@@ -98,15 +118,21 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
     }, 4000);
 
     const handleJourneyStarted = () => fetchShipments();
+    const handleJourneyTerminated = () => fetchShipments();
+    const handleJourneyDelivered = () => fetchShipments();
     const handleJourneyDeleted = () => fetchShipments();
 
     if (typeof window !== 'undefined') {
       window.addEventListener('ner_journey_started', handleJourneyStarted);
+      window.addEventListener('ner_journey_terminated', handleJourneyTerminated);
+      window.addEventListener('ner_journey_delivered', handleJourneyDelivered);
       window.addEventListener('ner_journey_deleted', handleJourneyDeleted);
       return () => {
         supabase.removeChannel(channel);
         clearInterval(pollTimer);
         window.removeEventListener('ner_journey_started', handleJourneyStarted);
+        window.removeEventListener('ner_journey_terminated', handleJourneyTerminated);
+        window.removeEventListener('ner_journey_delivered', handleJourneyDelivered);
         window.removeEventListener('ner_journey_deleted', handleJourneyDeleted);
       };
     }

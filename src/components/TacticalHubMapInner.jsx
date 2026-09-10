@@ -1332,16 +1332,18 @@ export default function TacticalHubMapInner({
           </div>
           {multiRouteData?.allRoutes && multiRouteData.allRoutes.length > 0 && (
             <>
-              <div className="flex items-center space-x-2 text-blue-700 dark:text-blue-400">
-                <span className="w-3 h-3 rounded-full bg-[#1a73e8] border-2 border-white shadow-xs shrink-0" />
-                <span>Selected Route</span>
+              <div className="flex items-center space-x-2 text-emerald-700 dark:text-emerald-400">
+                <span className="w-3 h-3 rounded-full bg-[#10b981] border-2 border-white shadow-xs shrink-0" />
+                <span>Safe Corridor (SCI &lt; 25)</span>
               </div>
-              {multiRouteData.allRoutes.length > 1 && (
-                <div className="flex items-center space-x-2 text-slate-500">
-                  <span className="w-3 h-3 rounded-full bg-[#8da4c4] border-2 border-white shadow-xs shrink-0" />
-                  <span>Alternative Route(s)</span>
-                </div>
-              )}
+              <div className="flex items-center space-x-2 text-amber-700 dark:text-amber-400">
+                <span className="w-3 h-3 rounded-full bg-[#f59e0b] border-2 border-white shadow-xs shrink-0" />
+                <span>Caution Corridor (SCI 25–49)</span>
+              </div>
+              <div className="flex items-center space-x-2 text-rose-700 dark:text-rose-400">
+                <span className="w-3 h-3 rounded-full bg-[#ef4444] border-2 border-white shadow-xs shrink-0" />
+                <span>High Risk Corridor (SCI &ge; 50)</span>
+              </div>
             </>
           )}
           <div className="flex items-center space-x-2 text-red-600 dark:text-red-400">
