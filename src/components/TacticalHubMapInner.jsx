@@ -43,7 +43,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
-import { getHubsOffline, saveHubsOffline } from '@/lib/offlineDb';
+import { getHubsOffline, saveHubsOffline, deleteHazardOffline } from '@/lib/offlineDb';
 import MapPinPicker from '@/components/MapPinPicker';
 import { estimateNerLocationFallback } from '@/lib/geoUtils';
 import MultiRouteLayer from '@/components/MultiRouteLayer';
@@ -372,7 +372,12 @@ export default function TacticalHubMapInner({
     if (e) e.stopPropagation();
     if (!hazard?.id) return;
 
-    const isMine = user?.id && (hazard.reported_by_id === user.id || hazard.reported_by === user.id);
+    const isMine = user?.id && (
+      hazard.reported_by_id === user.id || 
+      hazard.reported_by === user.id || 
+      hazard.created_by === user.id || 
+      hazard.user_id === user.id
+    );
     const isNodal = effectiveIsNodal;
 
     if (!isNodal && !isMine) {
@@ -380,24 +385,48 @@ export default function TacticalHubMapInner({
       return;
     }
 
-    const confirmMsg = isNodal
-      ? `Government Nodal Authority Override:\nAre you sure you want to resolve and delete the hazard "${hazard.title || 'Record'}"? This action will remove it from the regional transit map.`
-      : `Are you sure you want to clear and delete your reported hazard: "${hazard.title || 'Record'}"?`;
+    const confirmMsg = isNodal && !isMine
+      ? `[GOVERNMENT AUTHORITY OVERRIDE]\nAre you sure you want to delete this hazard? This action cannot be undone.`
+      : `Are you sure you want to delete this hazard? This action cannot be undone.`;
 
     if (!window.confirm(confirmMsg)) return;
 
     try {
       setDeletingHazardId(hazard.id);
-      const { error } = await supabase
+      // 1. Optimistic removal from map
+      setHazards((prev) => prev.filter((h) => h.id !== hazard.id));
+
+      // 2. Add to deleted cache
+      if (typeof window !== 'undefined') {
+        try {
+          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+          if (!delCache.includes(hazard.id)) {
+            delCache.push(hazard.id);
+            sessionStorage.setItem('ner_deleted_hazards', JSON.stringify(delCache));
+            localStorage.setItem('ner_deleted_hazards', JSON.stringify(delCache));
+          }
+        } catch (e) {}
+      }
+
+      // 3. Delete via backend API
+      try {
+        await fetch('/api/records/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'hazard', id: hazard.id }),
+        });
+      } catch (apiErr) {}
+
+      // 4. Delete from Supabase directly
+      await supabase
         .from('road_hazards')
         .delete()
         .eq('id', hazard.id);
 
-      if (error) {
-        throw error;
-      }
-
-      setHazards((prev) => prev.filter((h) => h.id !== hazard.id));
+      // 5. Delete from Dexie offline DB
+      try {
+        await deleteHazardOffline(hazard.id);
+      } catch (dexErr) {}
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('ner_hazard_deleted', { detail: { id: hazard.id } }));
@@ -411,7 +440,7 @@ export default function TacticalHubMapInner({
     }
   };
 
-  // Sync with prop when parent updates
+    // Sync with prop when parent updates
   useEffect(() => {
     if (propHazards !== null && propHazards !== undefined) {
       setHazards(propHazards);
@@ -518,9 +547,16 @@ export default function TacticalHubMapInner({
     }
   }, []);
 
-  // Live Fleet Telemetry: Nodal Officers track all convoys; Drivers track their own active convoy
+  // Live Fleet Telemetry: STRICTLY NODAL-ONLY CONVOY TRACKING
   useEffect(() => {
     async function fetchFleetTelemetry() {
+      // If not a Nodal Officer, strictly do not fetch or display live fleet telemetry
+      if (!effectiveIsNodal) {
+        setActiveDrivers([]);
+        setSelectedRadarDriver(null);
+        setShowDriverDropdown(false);
+        return;
+      }
       try {
         // Query active in-transit shipments
         let shipQuery = supabase
@@ -564,7 +600,7 @@ export default function TacticalHubMapInner({
               combined.push({
                 id: s.id || `ship-${s.tracking_code}`,
                 driver_id: s.driver_id,
-                driver_code: s.driver_code || d?.driver_code || 'DRV-NER-4921',
+                driver_code: s.driver_code || d?.driver_code || `DRV-NER-${(s.driver_id || '4921').slice(0, 4).toUpperCase()}`,
                 driver_name: s.driver_name || d?.full_name || 'Field Operator',
                 driver_phone: s.driver_phone || d?.phone || '+91-94350-00000',
                 vehicle_number: d?.vehicle_number || s.vehicle_number || 'AS-01-AX-9921',
@@ -581,32 +617,6 @@ export default function TacticalHubMapInner({
                 tracking_code: s.tracking_code,
               });
               if (s.driver_id) seenDriverIds.add(s.driver_id);
-            }
-          });
-        }
-
-        if (isNodalOfficer) {
-          driversMap.forEach((d, id) => {
-            if (!seenDriverIds.has(id) && d.current_latitude && d.current_longitude && d.is_active_duty) {
-              combined.push({
-                id: id,
-                driver_id: id,
-                driver_code: d.driver_code || `DRV-NER-${id.slice(0, 4).toUpperCase()}`,
-                driver_name: d.full_name || 'Field Operator',
-                driver_phone: d.phone || '+91-94350-00000',
-                vehicle_number: d.vehicle_number || 'AS-01-AX-9921',
-                cargo_type: 'General Relief Consignment',
-                cargo_weight_val: 12.5,
-                cargo_weight_unit: 'MT',
-                origin_hub_name: 'Guwahati Hub',
-                dest_hub_name: 'Field Corridor',
-                current_lat: d.current_latitude,
-                current_lng: d.current_longitude,
-                last_ping: d.last_ping || d.last_telemetry_at || new Date().toISOString(),
-                last_telemetry_at: d.last_ping || d.last_telemetry_at || new Date().toISOString(),
-                status: 'IN_TRANSIT',
-                tracking_code: `TRK-${d.driver_code || id.slice(0, 6)}`,
-              });
             }
           });
         }
@@ -1097,7 +1107,7 @@ export default function TacticalHubMapInner({
         })}
 
         {/* 4. ACTIVE RELIEF CONVOY FLEET LAYER (Dedicated Telemetry for Nodal Authority Portal) */}
-        {isNodalOfficer && activeDrivers.map((driver) => {
+        {effectiveIsNodal && activeDrivers.map((driver) => {
           const dLat = parseFloat(driver.current_lat || driver.current_latitude);
           const dLng = parseFloat(driver.current_lng || driver.current_longitude);
           if (isNaN(dLat) || isNaN(dLng)) return null;
@@ -1200,8 +1210,8 @@ export default function TacticalHubMapInner({
         )}
       </MapContainer>
 
-      {/* Dedicated Tactical Driver Tracking Search Bar (Government / Nodal Portal Only) */}
-      {isNodalOfficer && (
+      {/* Dedicated Tactical Driver Tracking Search Bar (Strictly Nodal Officers View and only when active convoys > 0) */}
+      {effectiveIsNodal && activeDrivers.length > 0 && (
         <div className="absolute top-3 left-14 z-[400] max-w-[calc(100%-110px)] sm:w-80 font-mono text-xs">
           <div className="relative">
             <div className="flex items-center bg-slate-950/95 backdrop-blur-md border border-cyan-800/80 hover:border-cyan-500 rounded-xl px-2.5 py-1.5 shadow-xl transition-all">
@@ -1322,41 +1332,7 @@ export default function TacticalHubMapInner({
         )}
       </button>
 
-      {/* Dynamic Map Legend (Adaptive to Role) */}
-      <div className="absolute bottom-3 left-3 z-[400] bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-800 rounded-xl p-2.5 shadow-sm text-[11px] font-mono space-y-1.5 select-none">
-        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">MAP LAYERS</span>
-        <div className="space-y-1 text-[10px] text-slate-800 dark:text-slate-200 font-bold">
-          <div className="flex items-center space-x-2">
-            <span className="w-3 h-3 rounded-full bg-slate-800 border-2 border-white shadow-xs shrink-0" />
-            <span>Supply Hubs ({filteredHubs.length} Facilities)</span>
-          </div>
-          {multiRouteData?.allRoutes && multiRouteData.allRoutes.length > 0 && (
-            <>
-              <div className="flex items-center space-x-2 text-blue-700 dark:text-blue-400">
-                <span className="w-3 h-3 rounded-full bg-[#1a73e8] border-2 border-white shadow-xs shrink-0" />
-                <span>Selected Route</span>
-              </div>
-              {multiRouteData.allRoutes.length > 1 && (
-                <div className="flex items-center space-x-2 text-slate-500">
-                  <span className="w-3 h-3 rounded-full bg-[#8da4c4] border-2 border-white shadow-xs shrink-0" />
-                  <span>Alternative Route(s)</span>
-                </div>
-              )}
-            </>
-          )}
-          <div className="flex items-center space-x-2 text-red-600 dark:text-red-400">
-            <span className="w-3 h-3 rounded-full bg-red-600 border-2 border-white shadow-xs animate-pulse shrink-0" />
-            <span>Road Hazards ({filteredHazards.length} Active Alerts)</span>
-          </div>
-          {isNodalOfficer && (
-            <div className="flex items-center space-x-2 text-cyan-700 dark:text-cyan-400">
-              <span className="w-3 h-3 rounded-full bg-slate-900 border-2 border-cyan-400 shadow-xs shrink-0" />
-              <span>Live Fleet Radar ({activeDrivers.length} Convoys)</span>
-            </div>
-          )}
-        </div>
-      </div>
-
+      {/* Map is kept clean with bottom-left overlay legend removed */}
     </div>
   );
 }

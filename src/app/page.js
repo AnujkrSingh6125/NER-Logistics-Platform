@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
 import { useNav } from '@/context/NavContext';
 import { useUserLocation } from '@/hooks/useUserLocation';
@@ -35,15 +36,18 @@ import {
   Users, 
   Activity,
   MapPin,
+  Clock,
   ChevronRight,
   RotateCcw,
   XCircle,
   Navigation,
   LocateFixed,
-  Trash2
+  Trash2,
+  Maximize2,
+  Map as MapIcon
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
-import { getHubsOffline, saveHubsOffline } from '@/lib/offlineDb';
+import { db, getHubsOffline, saveHubsOffline, syncPendingReportsWhenOnline, syncPendingShipmentsWhenOnline } from '@/lib/offlineDb';
 import { calculateSafestMultiRoutes, findHazardsAlongRoute, rescoreRoutesWithHazards } from '@/lib/routingService';
 
 // Master Fallback 50 NER Supply Hubs across all 8 states
@@ -115,19 +119,17 @@ const FALLBACK_50_HUBS = [
   { id: '50', hub_name: 'Mangan North Sikkim High-Altitude Depot', hub_code: 'HUB-SIK-002', state: 'Sikkim', district: 'North Sikkim', latitude: 27.5042, longitude: 88.5303 },
 ];
 
-const DEFAULT_HAZARDS = [];
-
 export default function Home() {
   const { user, profile, isNodalOfficer, nodalOfficer } = useAuth();
   const { currentView, setCurrentView, mapFocusTarget, focusOnMap } = useNav();
-  const userLocation = useUserLocation(); // Live browser GPS geolocation hook
+  const userLocation = useUserLocation();
 
   const [hubs, setHubs] = useState(FALLBACK_50_HUBS);
   const [hazards, setHazards] = useState([]);
-  const [activeConvoysCount, setActiveConvoysCount] = useState(0);
+  const [shipmentsList, setShipmentsList] = useState([]);
   const [activeTileStyle, setActiveTileStyle] = useState('streets');
 
-  // Route Planning State (Default empty so map strictly displays only hubs and hazards)
+  // Route Planning State
   const [originHubId, setOriginHubId] = useState('');
   const [destHubId, setDestHubId] = useState('');
   const [calculatingRoute, setCalculatingRoute] = useState(false);
@@ -137,13 +139,13 @@ export default function Home() {
   const [routeBounds, setRouteBounds] = useState(null);
   const [routingError, setRoutingError] = useState('');
 
-  // ⚠️ Hazard Reporting & Interactive Map Picker States
+  // Hazard Reporting & Map Picker States
   const [hazardModalOpen, setHazardModalOpen] = useState(false);
   const [isPickingLocation, setIsPickingLocation] = useState(false);
   const [hazardCoords, setHazardCoords] = useState(null);
   const [savedFormData, setSavedFormData] = useState(null);
 
-  // 🚀 Transit Journey & Driver Duty States
+  // Transit Journey & Driver Duty States
   const [activeJourney, setActiveJourney] = useState(null);
   const [startingJourney, setStartingJourney] = useState(false);
   const [terminatingJourney, setTerminatingJourney] = useState(false);
@@ -151,7 +153,7 @@ export default function Home() {
   const [journeyNotice, setJourneyNotice] = useState(null);
   const [isManifestModalOpen, setIsManifestModalOpen] = useState(false);
 
-  // 📱 Mobile View Segmented Tab State ('route' | 'telemetry' | 'hazards')
+  // Mobile View Segmented Tab State
   const [mobileTab, setMobileTab] = useState('route');
 
   // Check active transit journey on mount
@@ -182,7 +184,6 @@ export default function Home() {
         console.warn('Active journey check notice:', e);
       }
 
-      // Check localStorage backup
       if (typeof window !== 'undefined') {
         try {
           const cached = localStorage.getItem('ner_active_transit_journey') || localStorage.getItem('ner_active_journey');
@@ -200,6 +201,214 @@ export default function Home() {
     }
     loadActiveJourney();
   }, [user?.id]);
+
+  // 1. Fetch Shipments with Dexie + LocalStorage fallbacks
+  const fetchAllShipments = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('shipments')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      let combined = Array.isArray(data) ? [...data] : [];
+
+      // Check Dexie IndexedDB for offline shipments
+      try {
+        const offlineList = await db.shipments.toArray();
+        if (Array.isArray(offlineList) && offlineList.length > 0) {
+          offlineList.forEach(off => {
+            if (!combined.some(s => s.id === off.id || (off.tracking_code && s.tracking_code === off.tracking_code))) {
+              combined.unshift(off);
+            }
+          });
+        }
+      } catch (dexErr) {}
+
+      // Check localStorage for any local active journey
+      if (typeof window !== 'undefined') {
+        try {
+          const cached = localStorage.getItem('ner_active_journey') || localStorage.getItem('ner_active_transit_journey');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && parsed.tracking_code) {
+              const alreadyExists = combined.some(s => 
+                s.tracking_code === parsed.tracking_code || (parsed.id && s.id === parsed.id)
+              );
+              if (!alreadyExists) {
+                combined.unshift(parsed);
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      // Filter out permanently deleted shipments
+      if (typeof window !== 'undefined') {
+        try {
+          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
+          combined = combined.filter(s => !delCache.includes(s.id) && !delCache.includes(s.tracking_code));
+        } catch (e) {}
+      }
+
+      setShipmentsList(combined);
+    } catch (err) {
+      console.warn('Shipments fetch notice:', err);
+    }
+  }, []);
+
+  // 2. Fetch Hazards with Dexie fallback
+  const fetchAllHazards = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('road_hazards')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      let combined = Array.isArray(data) ? [...data] : [];
+
+      // Check Dexie IndexedDB for offline queued hazards
+      try {
+        const offlineHazards = await db.offline_hazard_queue.where('synced').equals(0).toArray();
+        if (Array.isArray(offlineHazards) && offlineHazards.length > 0) {
+          offlineHazards.forEach(offH => {
+            if (!combined.some(h => h.id === offH.id)) {
+              combined.unshift(offH);
+            }
+          });
+        }
+      } catch (e) {}
+
+      // Filter out permanently deleted hazards
+      if (typeof window !== 'undefined') {
+        try {
+          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+          combined = combined.filter(h => !delCache.includes(h.id));
+        } catch (e) {}
+      }
+
+      if (combined.length > 0) {
+        setHazards(combined);
+      } else {
+        let defaultMocks = [
+          { id: 'hz1', title: 'Landslide on NH-27 (Nagaon Bypass)', hazard_type: 'landslide', severity: 'critical', latitude: 26.345, longitude: 92.684, status: 'active', state: 'Assam' },
+          { id: 'hz2', title: 'Road Repair near Imphal-Churachandpur', hazard_type: 'road_damage', severity: 'medium', latitude: 24.580, longitude: 93.810, status: 'active', state: 'Manipur' }
+        ];
+        if (typeof window !== 'undefined') {
+          try {
+            const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+            defaultMocks = defaultMocks.filter(h => !delCache.includes(h.id));
+          } catch (e) {}
+        }
+        setHazards(defaultMocks);
+      }
+    } catch (err) {
+      console.warn('Hazards fetch notice:', err);
+      try {
+        const offlineHazards = await db.road_hazards.toArray();
+        if (offlineHazards && offlineHazards.length > 0) {
+          setHazards(offlineHazards);
+        }
+      } catch (e) {}
+    }
+  }, []);
+
+  // Synchronized Realtime Subscriptions & Polling
+  useEffect(() => {
+    fetchAllHazards();
+    fetchAllShipments();
+
+    // Supabase Realtime channel for live updates
+    const channel = supabase
+      .channel('public:home_realtime_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'road_hazards' }, () => {
+        fetchAllHazards();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shipments' }, () => {
+        fetchAllShipments();
+      })
+      .subscribe();
+
+    // 4-second polling fallback for zero-latency sync across tabs
+    const pollTimer = setInterval(() => {
+      fetchAllHazards();
+      fetchAllShipments();
+    }, 4000);
+
+    const handleReloadHazards = () => fetchAllHazards();
+    const handleReloadShipments = () => fetchAllShipments();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('ner_hazard_reported', handleReloadHazards);
+      window.addEventListener('ner_hazard_deleted', handleReloadHazards);
+      window.addEventListener('ner_journey_started', handleReloadShipments);
+      window.addEventListener('ner_journey_terminated', handleReloadShipments);
+      window.addEventListener('ner_journey_delivered', handleReloadShipments);
+      window.addEventListener('ner_journey_deleted', handleReloadShipments);
+
+      return () => {
+        supabase.removeChannel(channel);
+        clearInterval(pollTimer);
+        window.removeEventListener('ner_hazard_reported', handleReloadHazards);
+        window.removeEventListener('ner_hazard_deleted', handleReloadHazards);
+        window.removeEventListener('ner_journey_started', handleReloadShipments);
+        window.removeEventListener('ner_journey_terminated', handleReloadShipments);
+        window.removeEventListener('ner_journey_delivered', handleReloadShipments);
+        window.removeEventListener('ner_journey_deleted', handleReloadShipments);
+      };
+    }
+  }, [fetchAllHazards, fetchAllShipments]);
+
+  // Automatic Store-and-Forward Sync whenever network connectivity resumes
+  useEffect(() => {
+    async function handleOnlineSync() {
+      try {
+        const hazardSync = await syncPendingReportsWhenOnline(async (payload) => {
+          await supabase.from('road_hazards').insert([payload]);
+        });
+        const shipmentSync = await syncPendingShipmentsWhenOnline(async (payload) => {
+          const res = await supabase.from('shipments').insert([payload]).select().maybeSingle();
+          return res?.data;
+        });
+
+        if (hazardSync.syncedCount > 0 || shipmentSync.syncedCount > 0) {
+          fetchAllHazards();
+          fetchAllShipments();
+          setJourneyNotice({
+            type: 'success',
+            message: `✅ Network Restored: Synced ${shipmentSync.syncedCount} convoy(s) & ${hazardSync.syncedCount} hazard(s) with cloud server.`,
+          });
+        }
+      } catch (err) {
+        console.warn('Auto-sync notice:', err);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnlineSync);
+      if (navigator.onLine) {
+        handleOnlineSync();
+      }
+      return () => {
+        window.removeEventListener('online', handleOnlineSync);
+      };
+    }
+  }, [fetchAllHazards, fetchAllShipments]);
+
+  // Live computed metrics matching ShipmentsView and HazardsView exactly:
+  const inTransitConvoysCount = useMemo(() => {
+    return shipmentsList.filter((s) => {
+      const st = (s.status || '').toLowerCase();
+      return st === 'in_transit' || st === 'in-transit' || st === 'active';
+    }).length;
+  }, [shipmentsList]);
+
+  const activeHazardsCount = useMemo(() => {
+    return hazards.filter(h => (h.status || '').toLowerCase() !== 'resolved').length;
+  }, [hazards]);
+
+  const criticalHazardsCount = useMemo(() => {
+    return hazards.filter(h => (h.status || '').toLowerCase() !== 'resolved' && (h.severity || '').toLowerCase() === 'critical').length;
+  }, [hazards]);
 
   // Continuous Telemetry Sync during active journey
   useEffect(() => {
@@ -283,10 +492,16 @@ export default function Home() {
     setIsManifestModalOpen(true);
   };
 
-  // Handler: Manifest Successfully Dispatched from Modal
+  // Handler: Manifest Successfully Dispatched from Modal (Online or Offline)
   const handleManifestDispatched = (shipmentRecord) => {
     setActiveJourney(shipmentRecord);
-    setJourneyNotice({ type: 'success', message: `🚀 Convoy journey active: ${shipmentRecord.tracking_code}` });
+    const isOffline = shipmentRecord?.is_offline_dispatched || (typeof navigator !== 'undefined' && !navigator.onLine);
+    setJourneyNotice({ 
+      type: 'success', 
+      message: isOffline 
+        ? `📡 Offline Convoy Dispatched: ${shipmentRecord.tracking_code} (Queued in IndexedDB)` 
+        : `🚀 Convoy journey active: ${shipmentRecord.tracking_code}` 
+    });
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('ner_journey_started', { detail: shipmentRecord }));
@@ -300,310 +515,96 @@ export default function Home() {
     setJourneyNotice(null);
 
     try {
-      const shipId = activeJourney?.id;
-      const trackingCode = activeJourney?.tracking_code;
-
-      // 1. Update status to DELIVERED in public.shipments
-      try {
-        if (shipId) {
-          await supabase
-            .from('shipments')
-            .update({ status: 'DELIVERED', updated_at: new Date().toISOString() })
-            .eq('id', shipId);
-        } else if (trackingCode) {
-          await supabase
-            .from('shipments')
-            .update({ status: 'DELIVERED', updated_at: new Date().toISOString() })
-            .eq('tracking_code', trackingCode);
-        } else if (user?.id) {
-          await supabase
-            .from('shipments')
-            .update({ status: 'DELIVERED', updated_at: new Date().toISOString() })
-            .eq('driver_id', user.id)
-            .in('status', ['IN_TRANSIT', 'in_transit', 'ACTIVE', 'active']);
-        }
-      } catch (e) {
-        console.warn('Update shipment delivered notice:', e);
+      if (activeJourney.id) {
+        await supabase
+          .from('shipments')
+          .update({
+            status: 'DELIVERED',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', activeJourney.id);
       }
 
-      // 2. Halt active duty state in driver_profiles
       if (user?.id) {
-        try {
-          await supabase
-            .from('driver_profiles')
-            .update({
-              is_active_duty: false,
-              last_ping: new Date().toISOString()
-            })
-            .eq('id', user.id);
-        } catch (e) {}
+        await supabase
+          .from('driver_profiles')
+          .update({
+            is_active_duty: false,
+            last_ping: new Date().toISOString()
+          })
+          .eq('id', user.id);
       }
 
-      // 3. Stop GPS broadcasting & clean local state
-      if (userLocation?.stopTracking) {
-        try {
-          userLocation.stopTracking();
-        } catch (e) {}
-      }
-      
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.removeItem('ner_active_journey');
-          localStorage.removeItem('ner_active_transit_journey');
-        } catch (e) {}
-      }
-
-      const deliveredCode = trackingCode || 'Consignment';
       setActiveJourney(null);
-      setJourneyNotice({ type: 'success', message: `✅ Consignment ${deliveredCode} marked as DELIVERED.` });
+      setJourneyNotice({ type: 'success', message: '✅ Relief cargo delivered safely!' });
 
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('ner_journey_completed'));
-        window.dispatchEvent(new CustomEvent('ner_journey_deleted'));
+        localStorage.removeItem('ner_active_transit_journey');
+        localStorage.removeItem('ner_active_journey');
+        window.dispatchEvent(new CustomEvent('ner_journey_delivered', { detail: activeJourney }));
       }
     } catch (err) {
-      console.error('Mark delivered error:', err);
-      setRoutingError('Failed to mark shipment as delivered.');
+      console.error('Error marking delivered:', err);
     } finally {
       setMarkingDelivered(false);
     }
   };
 
-  // Handler: Terminate & Delete Transit Journey
+  // Handler: Terminate Journey
   const handleDeleteJourney = async () => {
     if (!activeJourney && !user?.id) return;
     setTerminatingJourney(true);
-    setJourneyNotice(null);
-
     try {
-      // 1. Permanently delete from public.shipments
-      try {
-        if (activeJourney?.id) {
-          await supabase
-            .from('shipments')
-            .delete()
-            .eq('id', activeJourney.id);
-        } else if (user?.id) {
-          await supabase
-            .from('shipments')
-            .delete()
-            .eq('driver_id', user.id)
-            .in('status', ['IN_TRANSIT', 'in_transit', 'ACTIVE', 'active']);
-        }
-      } catch (e) {
-        console.warn('Delete shipment note:', e);
+      if (activeJourney?.id) {
+        await supabase
+          .from('shipments')
+          .update({ status: 'TERMINATED', updated_at: new Date().toISOString() })
+          .eq('id', activeJourney.id);
       }
 
-      // 2. Halt active duty state in driver_profiles
       if (user?.id) {
-        try {
-          await supabase
-            .from('driver_profiles')
-            .update({
-              is_active_duty: false,
-              last_ping: new Date().toISOString()
-            })
-            .eq('id', user.id);
-        } catch (e) {}
-      }
-
-      // 3. Stop GPS broadcasting & clean local state
-      if (userLocation?.stopTracking) {
-        try {
-          userLocation.stopTracking();
-        } catch (e) {}
-      }
-      
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.removeItem('ner_active_journey');
-          localStorage.removeItem('ner_active_transit_journey');
-        } catch (e) {}
+        await supabase
+          .from('driver_profiles')
+          .update({ is_active_duty: false, last_ping: new Date().toISOString() })
+          .eq('id', user.id);
       }
 
       setActiveJourney(null);
       setJourneyNotice({ type: 'info', message: 'Transit journey terminated and driver telemetry halted.' });
 
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('ner_journey_deleted'));
+        localStorage.removeItem('ner_active_transit_journey');
+        localStorage.removeItem('ner_active_journey');
+        window.dispatchEvent(new CustomEvent('ner_journey_terminated', { detail: activeJourney }));
       }
     } catch (err) {
-      console.error('Delete journey error:', err);
-      setRoutingError('Failed to terminate journey.');
+      console.error('Error terminating journey:', err);
     } finally {
       setTerminatingJourney(false);
     }
   };
 
-  // Load live data from Supabase
-  useEffect(() => {
-    async function initData() {
-      try {
-        const { data: hubData } = await supabase
-          .from('supply_hubs')
-          .select('*')
-          .order('state', { ascending: true });
-
-        if (hubData && hubData.length > 0) {
-          setHubs(hubData);
-          saveHubsOffline(hubData).catch(() => {});
-        } else {
-          const cached = await getHubsOffline();
-          if (cached && cached.length > 0) setHubs(cached);
-        }
-
-        const { data: hazData } = await supabase
-          .from('road_hazards')
-          .select('*')
-          .neq('status', 'resolved');
-
-        setHazards(hazData || []);
-
-        const { data: shipData } = await supabase
-          .from('shipments')
-          .select('id')
-          .in('status', ['IN_TRANSIT', 'in_transit', 'ACTIVE', 'active']);
-
-        setActiveConvoysCount(shipData?.length || 0);
-      } catch (err) {
-        console.warn('Dashboard data fetch fallback:', err);
-      }
-    }
-
-    initData();
-
-    // Listen for new field hazard reports dispatched from modal
-    const handleHazardReported = async () => {
-      try {
-        const { data: hazData } = await supabase
-          .from('road_hazards')
-          .select('*')
-          .neq('status', 'resolved');
-        if (hazData) setHazards(hazData);
-      } catch (err) {}
-    };
-
-    // Listen for locally cleared/deleted hazard
-    const handleHazardDeleted = (e) => {
-      const delId = e?.detail?.id;
-      if (delId) {
-        setHazards((prev) => prev.filter((h) => h.id !== delId));
-      }
-    };
-
-    // Listen for global navbar request to open hazard modal on dashboard
-    const handleOpenHazardModal = (e) => {
-      if (e.detail) setHazardCoords(e.detail);
-      setHazardModalOpen(true);
-    };
-
-    // Helper to refresh active convoy counts
-    const refreshShipmentsCount = async () => {
-      try {
-        const { data: shipData } = await supabase
-          .from('shipments')
-          .select('id')
-          .in('status', ['IN_TRANSIT', 'in_transit', 'ACTIVE', 'active']);
-        setActiveConvoysCount(shipData?.length || 0);
-      } catch (e) {}
-    };
-
-    // Realtime channel for live hazard and shipments count sync
-    const rtChannel = supabase
-      .channel('dashboard_metrics_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'road_hazards' }, async (payload) => {
-        if (payload?.eventType === 'DELETE') {
-          const delId = payload.old?.id;
-          if (delId) {
-            setHazards((prev) => prev.filter((h) => h.id !== delId));
-          }
-        } else if (payload?.eventType === 'INSERT') {
-          if (payload.new && payload.new.status !== 'resolved') {
-            setHazards((prev) => [payload.new, ...prev.filter((h) => h.id !== payload.new.id)]);
-          }
-        } else if (payload?.eventType === 'UPDATE') {
-          if (payload.new?.status === 'resolved') {
-            setHazards((prev) => prev.filter((h) => h.id !== payload.new.id));
-          } else if (payload.new) {
-            setHazards((prev) => [payload.new, ...prev.filter((h) => h.id !== payload.new.id)]);
-          }
-        }
-
-        // Secondary background verification to ensure 100% sync
-        const { data: hazData } = await supabase
-          .from('road_hazards')
-          .select('*')
-          .neq('status', 'resolved');
-        if (hazData) setHazards(hazData);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shipments' }, () => {
-        refreshShipmentsCount();
-      })
-      .subscribe();
-
-    // Auto-polling interval for fallback metrics sync (every 10s)
-    const pollInterval = setInterval(() => {
-      refreshShipmentsCount();
-    }, 10000);
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('ner_hazard_reported', handleHazardReported);
-      window.addEventListener('ner_hazard_deleted', handleHazardDeleted);
-      window.addEventListener('ner_open_hazard_modal', handleOpenHazardModal);
-      window.addEventListener('ner_journey_started', refreshShipmentsCount);
-      window.addEventListener('ner_journey_deleted', refreshShipmentsCount);
-      return () => {
-        supabase.removeChannel(rtChannel);
-        clearInterval(pollInterval);
-        window.removeEventListener('ner_hazard_reported', handleHazardReported);
-        window.removeEventListener('ner_hazard_deleted', handleHazardDeleted);
-        window.removeEventListener('ner_open_hazard_modal', handleOpenHazardModal);
-        window.removeEventListener('ner_journey_started', refreshShipmentsCount);
-        window.removeEventListener('ner_journey_deleted', refreshShipmentsCount);
-      };
-    }
-  }, []);
-
-  // Compute Origin Object (support live GPS position)
+  // Selected Origin & Dest Objects
   const originHub = useMemo(() => {
     if (!originHubId) return null;
     if (originHubId === 'CURRENT_LOCATION') {
-      if (userLocation.coords) {
-        return {
-          id: 'CURRENT_LOCATION',
-          hub_code: 'GPS-LIVE',
-          hub_name: 'My Current Location (GPS)',
-          state: 'Live GPS',
-          district: `±${Math.round(userLocation.accuracy || 0)}m`,
-          latitude: userLocation.coords.lat,
-          longitude: userLocation.coords.lng,
-        };
-      }
-      return null;
+      const coords = userLocation.coords || [26.1445, 91.7362];
+      return {
+        id: 'CURRENT_LOCATION',
+        hub_name: 'Current Live GPS Location',
+        hub_code: 'MY-GPS',
+        state: 'Assam',
+        latitude: Array.isArray(coords) ? coords[0] : coords.lat,
+        longitude: Array.isArray(coords) ? coords[1] : coords.lng,
+      };
     }
     return hubs.find((h) => h.hub_code === originHubId || h.id === originHubId) || null;
-  }, [hubs, originHubId, userLocation.coords, userLocation.accuracy]);
+  }, [originHubId, userLocation.coords, hubs]);
 
   const destHub = useMemo(() => {
     if (!destHubId) return null;
     return hubs.find((h) => h.hub_code === destHubId || h.id === destHubId) || null;
-  }, [hubs, destHubId]);
-
-  // Destination options with currently selected origin filtered or disabled
-  const destinationOptions = useMemo(() => {
-    return hubs.map((h) => ({
-      ...h,
-      disabled: h.hub_code === originHubId || h.id === originHubId,
-    }));
-  }, [hubs, originHubId]);
-
-  // Origin options with currently selected dest disabled
-  const originOptions = useMemo(() => {
-    return hubs.map((h) => ({
-      ...h,
-      disabled: h.hub_code === destHubId || h.id === destHubId,
-    }));
-  }, [hubs, destHubId]);
+  }, [destHubId, hubs]);
 
   // If user picks CURRENT_LOCATION, auto-start location tracking if idle
   const handleOriginChange = (val) => {
@@ -637,7 +638,6 @@ export default function Home() {
         const defaultIdx = typeof result.safestRouteIndex === 'number' && result.safestRouteIndex >= 0 ? result.safestRouteIndex : 0;
         setActiveRouteIndex(defaultIdx);
 
-        // Fit bounds to encompass all candidate corridors simultaneously
         const allCorridorCoords = result.allRoutes.flatMap((r) => r.coordinates || []);
         if (allCorridorCoords.length > 1) {
           setRouteBounds(allCorridorCoords);
@@ -645,16 +645,24 @@ export default function Home() {
 
         const chosenRoute = result.allRoutes[defaultIdx] || result.allRoutes[0];
         setCorridorHazards(chosenRoute.flaggedHazards || []);
+        setRoutingError('');
+      } else {
+        setMultiRouteData(null);
+        setRouteBounds(null);
+        setCorridorHazards([]);
+        setRoutingError(result?.error || 'Offline Notice: Road corridor geometry is not cached on this device. Please reconnect to internet once to calculate and cache this route.');
       }
     } catch (err) {
-      console.error('Route calculation error:', err);
-      setRoutingError('Failed to compute route corridor. Retrying with topographic backup...');
+      console.warn('Route calculation notice:', err);
+      setMultiRouteData(null);
+      setRouteBounds(null);
+      setCorridorHazards([]);
+      setRoutingError('Offline Notice: Road corridor geometry is not cached on this device. Please reconnect to internet once to calculate and cache this route.');
     } finally {
       setCalculatingRoute(false);
     }
   }, [originHub, destHub, hazards]);
 
-  // Route selection handler (Google Maps smooth instant switch without viewport jumping)
   const handleSelectRouteIndex = useCallback((idx) => {
     if (!multiRouteData?.allRoutes?.[idx]) return;
     setActiveRouteIndex(idx);
@@ -662,7 +670,6 @@ export default function Home() {
     setCorridorHazards(chosen.flaggedHazards || []);
   }, [multiRouteData]);
 
-  // Real-time re-evaluation of active calculated corridors whenever hazards change
   useEffect(() => {
     if (multiRouteData?.allRoutes && multiRouteData.allRoutes.length > 0) {
       const rescored = rescoreRoutesWithHazards(multiRouteData.allRoutes, hazards);
@@ -674,7 +681,6 @@ export default function Home() {
     }
   }, [hazards]);
 
-  // Dedicated Reset / Clear Route Handler
   const handleResetRoute = () => {
     setOriginHubId('');
     setDestHubId('');
@@ -687,7 +693,7 @@ export default function Home() {
 
   const activeRoute = multiRouteData?.allRoutes?.[activeRouteIndex] || multiRouteData?.primaryRoute;
 
-  // AI Chat interactive map focus callbacks
+  // AI Chat callbacks
   const handleChatSelectHazard = useCallback((hazardIdentifier) => {
     setCurrentView('command');
     const match = hazards.find(h => 
@@ -713,7 +719,7 @@ export default function Home() {
   }, [hubs, focusOnMap, setCurrentView]);
 
   return (
-    <div className="min-h-screen bg-slate-100/90 dark:bg-slate-950 text-slate-800 dark:text-slate-100 py-4 px-3 sm:px-5 lg:px-6 space-y-5 font-sans flex flex-col">
+    <div className="min-h-screen bg-[#f4f7fb] dark:bg-slate-950 text-slate-800 dark:text-slate-100 py-4 px-3 sm:px-5 lg:px-6 space-y-4 sm:space-y-5 font-sans flex flex-col">
       
       {currentView === 'hazards' ? (
         <HazardsView 
@@ -731,6 +737,7 @@ export default function Home() {
         />
       ) : currentView === 'shipments' ? (
         <ShipmentsView 
+          shipments={shipmentsList}
           onSelectShipmentOnMap={(shipment) => {
             focusOnMap([parseFloat(shipment.current_lat), parseFloat(shipment.current_lng)], 14, shipment);
           }} 
@@ -739,36 +746,50 @@ export default function Home() {
         <SettingsView />
       ) : (
         <>
-          {/* 1. TOP HERO HEADER BANNER */}
-          <div className="relative rounded-3xl bg-gradient-to-r from-blue-50/70 via-slate-50/60 to-white/90 dark:from-slate-900/80 dark:via-slate-900/60 dark:to-slate-950/80 border border-slate-200/90 dark:border-slate-800/90 p-5 sm:p-6 shadow-xs overflow-hidden">
+          {/* ========================================================================= */}
+          {/* 1. TOP HERO HEADER BANNER WITH REAL BACKGROUND IMAGE FROM /header background.jpeg */}
+          {/* ========================================================================= */}
+          <div className="relative rounded-2xl border border-slate-200/90 dark:border-slate-800 py-3 sm:py-3.5 px-4 sm:px-6 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden bg-slate-900/10">
             
-            {/* Subtle soft backdrop accent */}
-            <div className="absolute right-0 top-0 bottom-0 w-1/3 pointer-events-none opacity-15 dark:opacity-10 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-400 via-sky-300 to-transparent" />
+            {/* Background Image Layer */}
+            <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden">
+              <Image
+                src="/header%20background.jpeg"
+                alt="Himalayan Valley & Mountains"
+                fill
+                priority
+                className="object-cover object-center opacity-100 dark:opacity-90 contrast-[1.08] brightness-[0.98]"
+              />
+              {/* Ultra-light gradient for pristine image visibility and crisp text legibility */}
+              <div className="absolute inset-0 bg-gradient-to-r from-white/50 via-white/15 to-transparent dark:from-slate-950/75 dark:via-slate-950/30 dark:to-transparent pointer-events-none" />
+              <div className="absolute inset-0 bg-gradient-to-t from-white/15 via-transparent to-transparent dark:from-slate-950/30 dark:via-transparent dark:to-transparent pointer-events-none" />
+            </div>
 
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 relative z-10">
               
               {/* Left Title & Subtitle */}
-              <div className="space-y-1 max-w-2xl">
-                <div className="flex items-center space-x-2">
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-blue-600 dark:text-cyan-400 bg-blue-100/70 dark:bg-blue-950/80 px-2 py-0.5 rounded-md border border-blue-200/60 dark:border-blue-800/60">
-                    # TACTICAL COMMAND GRID
+              <div className="space-y-1 max-w-xl bg-white/35 dark:bg-slate-900/45 py-2 px-3.5 rounded-xl backdrop-blur-[2px] border border-white/50 dark:border-slate-700/40">
+                <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#0284c7]/15 dark:bg-cyan-500/20 text-[#0284c7] dark:text-cyan-400 border border-[#0284c7]/20 dark:border-cyan-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#0284c7] dark:bg-cyan-400 animate-pulse" />
+                  <span className="text-[9px] sm:text-[10px] font-mono font-extrabold uppercase tracking-widest">
+                    TACTICAL COMMAND CENTER
                   </span>
                 </div>
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight leading-tight drop-shadow-sm">
                   Tactical Command & Convoy Center
                 </h1>
-                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium">
+                <p className="text-[11px] sm:text-xs text-slate-700 dark:text-slate-200 font-medium leading-normal drop-shadow-sm line-clamp-1 sm:line-clamp-none">
                   Real-time GIS multi-route planning, convoy telemetry, and hazard mitigation across 8 North-Eastern States.
                 </p>
               </div>
 
               {/* Right Slogan & Live Clock Widget */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 lg:gap-6 shrink-0">
-                <div className="text-right hidden sm:block">
-                  <span className="text-xs font-serif italic text-slate-700 dark:text-slate-300 font-medium block">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 lg:gap-5 shrink-0">
+                <div className="text-right hidden sm:block bg-white/35 dark:bg-slate-900/45 px-3 py-1.5 rounded-xl backdrop-blur-[2px] border border-white/50 dark:border-slate-700/40">
+                  <span className="text-xs font-serif italic text-slate-800 dark:text-slate-200 font-bold block drop-shadow-sm">
                     &ldquo;Better Intelligence, Safer Communities&rdquo;
                   </span>
-                  <div className="w-12 h-0.5 bg-blue-500 rounded-full ml-auto mt-1" />
+                  <div className="w-10 h-0.5 bg-[#0284c7] rounded-full ml-auto mt-0.5" />
                 </div>
 
                 <LiveClockWidget />
@@ -778,452 +799,407 @@ export default function Home() {
 
           </div>
 
-          {/* 2. SUMMARY METRICS ROW (4 Evenly Distributed Cards) */}
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+          {/* ========================================================================= */}
+          {/* 2. SUMMARY METRICS ROW (3 Evenly Distributed Cards: Hubs, Hazards, Convoys) */}
+          {/* ========================================================================= */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-3 gap-3 sm:gap-4">
             
             {/* Card 1: Strategic Hubs */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                  Strategic Hubs
-                </span>
-                <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900 flex items-center justify-center text-blue-600 dark:text-cyan-400">
-                  <Building2 className="w-4 h-4" />
+            <div 
+              onClick={() => setCurrentView('hubs')}
+              className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-[0_2px_12px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center justify-between group cursor-pointer"
+            >
+              <div className="flex items-center space-x-3.5 min-w-0">
+                <div className="w-11 h-11 rounded-2xl bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900 flex items-center justify-center text-[#0284c7] dark:text-cyan-400 shrink-0 group-hover:scale-105 transition-transform">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block truncate">
+                    Strategic Hubs
+                  </span>
+                  <span className="text-2xl font-black text-slate-900 dark:text-white font-mono leading-none mt-0.5 block">
+                    50
+                  </span>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">
+                    8 NER States Online
+                  </p>
                 </div>
               </div>
-              <div className="mt-3">
-                <span className="text-2xl font-black text-slate-900 dark:text-white font-mono">
-                  50
-                </span>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  8 NER States Online
-                </p>
-              </div>
+              <ChevronRight className="w-4 h-4 text-[#0284c7] group-hover:translate-x-0.5 transition-transform shrink-0" />
             </div>
 
-            {/* Card 2: Road Hazards */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                  Active Hazards
-                </span>
-                <div className="w-8 h-8 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-100 dark:border-rose-900 flex items-center justify-center text-rose-500">
-                  <AlertTriangle className="w-4 h-4" />
+            {/* Card 2: Active Hazards */}
+            <div 
+              onClick={() => setCurrentView('hazards')}
+              className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-[0_2px_12px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center justify-between group cursor-pointer"
+            >
+              <div className="flex items-center space-x-3.5 min-w-0">
+                <div className="w-11 h-11 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-100 dark:border-rose-900 flex items-center justify-center text-rose-500 shrink-0 group-hover:scale-105 transition-transform">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block truncate">
+                    Active Hazards
+                  </span>
+                  <span className="text-2xl font-black text-slate-900 dark:text-white font-mono leading-none mt-0.5 block">
+                    {activeHazardsCount}
+                  </span>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">
+                    {criticalHazardsCount} Critical Roadblocks
+                  </p>
                 </div>
               </div>
-              <div className="mt-3">
-                <span className="text-2xl font-black text-slate-900 dark:text-white font-mono">
-                  {hazards.length}
-                </span>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  {hazards.filter(h => (h.severity || '').toLowerCase() === 'critical').length} Critical Roadblocks
-                </p>
-              </div>
+              <ChevronRight className="w-4 h-4 text-rose-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
             </div>
 
             {/* Card 3: Live Convoys */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                  Live Convoys
-                </span>
-                <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-900 flex items-center justify-center text-emerald-500">
-                  <Truck className="w-4 h-4" />
+            <div 
+              onClick={() => setCurrentView('shipments')}
+              className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-[0_2px_12px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center justify-between group cursor-pointer"
+            >
+              <div className="flex items-center space-x-3.5 min-w-0">
+                <div className="w-11 h-11 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-900 flex items-center justify-center text-emerald-600 shrink-0 group-hover:scale-105 transition-transform">
+                  <Truck className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block truncate">
+                    Live Convoys
+                  </span>
+                  <span className="text-2xl font-black text-slate-900 dark:text-white font-mono leading-none mt-0.5 block">
+                    {inTransitConvoysCount}
+                  </span>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">
+                    {inTransitConvoysCount > 0 ? `${inTransitConvoysCount} En Route • 0 Halted` : '0 En Route • 0 Halted'}
+                  </p>
                 </div>
               </div>
-              <div className="mt-3">
-                <span className="text-2xl font-black text-slate-900 dark:text-white font-mono">
-                  {activeConvoysCount}
-                </span>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  {activeConvoysCount > 0 ? `${activeConvoysCount} In-Transit Relief` : 'Fleet on Standby'}
-                </p>
-              </div>
-            </div>
-
-            {/* Card 4: Nodal Units */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                  Nodal Units
-                </span>
-                <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-100 dark:border-amber-900 flex items-center justify-center text-amber-500">
-                  <Radio className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="mt-3">
-                <span className="text-2xl font-black text-slate-900 dark:text-white font-mono">
-                  8
-                </span>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  8 State Authorities
-                </p>
-              </div>
+              <ChevronRight className="w-4 h-4 text-emerald-500 group-hover:translate-x-0.5 transition-transform shrink-0" />
             </div>
 
           </div>
 
-          {/* 3. TOP DASHBOARD 3-COLUMN WORKBENCH (Mobile-First Layout) */}
+          {/* ========================================================================= */}
+          {/* 3. 3-COLUMN WORKBENCH (Route Navigator, Interactive Map, Telemetry)        */}
+          {/* ========================================================================= */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         
-        {/* ========================================================================= */}
-        {/* COLUMN 1: LEFT ROUTE NAVIGATOR (Span 3 on Desktop, Tabbed on Mobile)       */}
-        {/* ========================================================================= */}
-        <div className={`order-2 lg:order-1 lg:col-span-3 space-y-3.5 ${mobileTab === 'route' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'}`}>
-          <RouteNavigator
-            hubs={hubs}
-            originHubId={originHubId}
-            destHubId={destHubId}
-            onSelectOrigin={handleOriginChange}
-            onSelectDestination={setDestHubId}
-            onCalculateRoutes={() => calculateTacticalRoutes(originHub, destHub)}
-            onResetRoutes={handleResetRoute}
-            calculatingRoute={calculatingRoute}
-            routingError={routingError}
-            journeyNotice={journeyNotice}
-            routes={multiRouteData?.allRoutes || []}
-            activeRouteIndex={activeRouteIndex}
-            onSelectRouteIndex={handleSelectRouteIndex}
-            isTransitActive={!!activeJourney}
-            activeConvoyData={activeJourney}
-            onStartTransit={handleOpenManifestModal}
-            onMarkDelivered={handleMarkJourneyDelivered}
-            onTerminateTransit={handleDeleteJourney}
-            markingDelivered={markingDelivered}
-            terminatingJourney={terminatingJourney}
-            isGpsActive={userLocation.status === 'tracking'}
-          />
-        </div>
-
-        {/* ========================================================================= */}
-        {/* COLUMN 2: CENTER INTERACTIVE MAP VIEW (Order 1 on Mobile, Span 6 Desktop)  */}
-        {/* ========================================================================= */}
-        <div className="order-1 lg:order-2 lg:col-span-6 space-y-3 flex flex-col">
-          
-          {/* Section Header */}
-          <div className="flex items-center justify-between px-1">
-            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 font-mono uppercase tracking-wide flex items-center space-x-2">
-              <span>Interactive Map View</span>
-            </h2>
-            <div className="flex items-center space-x-1.5 text-[10px] font-mono text-slate-500 dark:text-slate-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
-              <span>GIS TELEMETRY LIVE</span>
-            </div>
-          </div>
-
-          {/* Interactive Map Component Container with Live Geolocation Tracking */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-2 sm:p-2.5 border border-slate-200/90 dark:border-slate-800 shadow-xs overflow-hidden">
-            <TacticalHubMap
-              height="490px"
-              activeTileStyle={activeTileStyle}
-              multiRouteData={multiRouteData}
-              activeRouteIndex={activeRouteIndex}
-              onSelectRoute={handleSelectRouteIndex}
-              routeBounds={routeBounds}
-              originHub={originHub}
-              destHub={destHub}
-              hazards={hazards}
-              userLocation={userLocation}
-              isNodalOfficer={isNodalOfficer}
-              isPickingLocation={isPickingLocation}
-              focusTarget={mapFocusTarget}
-              onLocationPick={(coords) => {
-                setHazardCoords(coords);
-                setIsPickingLocation(false);
-                setHazardModalOpen(true);
-              }}
-              pickedCoords={hazardCoords}
-              onCancelPick={() => {
-                setIsPickingLocation(false);
-                setHazardModalOpen(true);
-              }}
-              onSelectOrigin={(hub) => {
-                setOriginHubId(hub.hub_code || hub.id);
-                if (destHubId && destHubId !== (hub.hub_code || hub.id)) {
-                  calculateTacticalRoutes(hub, destHub);
-                }
-              }}
-              onSelectDest={(hub) => {
-                setDestHubId(hub.hub_code || hub.id);
-                if (originHubId && originHubId !== (hub.hub_code || hub.id)) {
-                  calculateTacticalRoutes(originHub, hub);
-                }
-              }}
-            />
-          </div>
-
-          {/* Driver Mobile Segmented Control Bar (Visible on phones & tablets < lg) */}
-          <div className="flex lg:hidden items-center bg-slate-200/90 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-300/80 dark:border-slate-800 text-xs font-mono font-bold shadow-xs">
-            <button
-              type="button"
-              onClick={() => setMobileTab('route')}
-              className={`flex-1 py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                mobileTab === 'route'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Route className="w-3.5 h-3.5" />
-              <span>Route</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMobileTab('telemetry')}
-              className={`flex-1 py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                mobileTab === 'telemetry'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Activity className="w-3.5 h-3.5" />
-              <span>Telemetry</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMobileTab('hazards')}
-              className={`flex-1 py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                mobileTab === 'hazards'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-              <span>Choke Points</span>
-              {hazards.length > 0 && (
-                <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.2 rounded-full font-bold">
-                  {hazards.length}
-                </span>
-              )}
-            </button>
-          </div>
-
-        </div>
-
-        {/* ========================================================================= */}
-        {/* COLUMN 3: RIGHT ACTION & TELEMETRY PANEL (Span 3 on Desktop, Tabbed on Mob)*/}
-        {/* ========================================================================= */}
-        <div className={`order-3 lg:col-span-3 space-y-3.5 ${mobileTab === 'telemetry' || mobileTab === 'hazards' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'}`}>
-          
-          {/* CORRIDOR TELEMETRY Card */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-3.5 font-mono">
-            
-            <div className="flex items-center justify-between pb-1 border-b border-slate-100 dark:border-slate-800">
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wide">
-                CORRIDOR TELEMETRY
-              </span>
-              {activeRoute && (
-                <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
-                  LIVE
-                </span>
-              )}
+            {/* COLUMN 1: LEFT ROUTE NAVIGATOR */}
+            <div className={`order-2 lg:order-1 lg:col-span-3 space-y-3.5 ${mobileTab === 'route' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'}`}>
+              <RouteNavigator
+                hubs={hubs}
+                originHubId={originHubId}
+                destHubId={destHubId}
+                onSelectOrigin={handleOriginChange}
+                onSelectDestination={setDestHubId}
+                onCalculateRoutes={() => calculateTacticalRoutes(originHub, destHub)}
+                onResetRoutes={handleResetRoute}
+                calculatingRoute={calculatingRoute}
+                routingError={routingError}
+                journeyNotice={journeyNotice}
+                onDismissJourneyNotice={() => setJourneyNotice(null)}
+                routes={multiRouteData?.allRoutes || []}
+                activeRouteIndex={activeRouteIndex}
+                onSelectRouteIndex={handleSelectRouteIndex}
+                isTransitActive={!!activeJourney}
+                activeConvoyData={activeJourney}
+                onStartTransit={handleOpenManifestModal}
+                onMarkDelivered={handleMarkJourneyDelivered}
+                onTerminateTransit={handleDeleteJourney}
+                markingDelivered={markingDelivered}
+                terminatingJourney={terminatingJourney}
+                isGpsActive={userLocation.status === 'tracking'}
+              />
             </div>
 
-            {/* Segmented Layer Tabs */}
-            <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
-              {['streets', 'topo', 'satellite'].map((t) => (
+            {/* COLUMN 2: CENTER INTERACTIVE MAP VIEW */}
+            <div className="order-1 lg:order-2 lg:col-span-6 space-y-3 flex flex-col">
+              
+              {/* Section Header */}
+              <div className="flex items-center justify-between px-1">
+                <h2 className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center space-x-2">
+                  <div className="w-5 h-5 rounded-md bg-blue-50 dark:bg-blue-950/60 flex items-center justify-center text-[#0284c7]">
+                    <MapIcon className="w-3.5 h-3.5" />
+                  </div>
+                  <span>Interactive Map View</span>
+                </h2>
+                <div className="flex items-center space-x-3 text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                    <span className="font-bold">GIS TELEMETRY LIVE</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Map Container */}
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-2 sm:p-2.5 border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
+                <TacticalHubMap
+                  height="490px"
+                  activeTileStyle={activeTileStyle}
+                  multiRouteData={multiRouteData}
+                  activeRouteIndex={activeRouteIndex}
+                  onSelectRoute={handleSelectRouteIndex}
+                  routeBounds={routeBounds}
+                  originHub={originHub}
+                  destHub={destHub}
+                  hazards={hazards}
+                  userLocation={userLocation}
+                  isNodalOfficer={isNodalOfficer}
+                  isPickingLocation={isPickingLocation}
+                  focusTarget={mapFocusTarget}
+                  onLocationPick={(coords) => {
+                    setHazardCoords(coords);
+                    setIsPickingLocation(false);
+                    setHazardModalOpen(true);
+                  }}
+                  pickedCoords={hazardCoords}
+                  onCancelPick={() => {
+                    setIsPickingLocation(false);
+                    setHazardModalOpen(true);
+                  }}
+                  onSelectOrigin={(hub) => {
+                    setOriginHubId(hub.hub_code || hub.id);
+                    if (destHubId && destHubId !== (hub.hub_code || hub.id)) {
+                      calculateTacticalRoutes(hub, destHub);
+                    }
+                  }}
+                  onSelectDest={(hub) => {
+                    setDestHubId(hub.hub_code || hub.id);
+                    if (originHubId && originHubId !== (hub.hub_code || hub.id)) {
+                      calculateTacticalRoutes(originHub, hub);
+                    }
+                  }}
+                />
+              </div>
+
+              {/* Mobile Segmented Control Bar */}
+              <div className="flex lg:hidden items-center bg-slate-200/80 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-300/80 dark:border-slate-800 text-xs font-mono font-bold shadow-xs">
                 <button
-                  key={t}
                   type="button"
-                  onClick={() => setActiveTileStyle(t)}
-                  className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer ${
-                    activeTileStyle === t
-                      ? 'bg-blue-600 text-white shadow-2xs'
+                  onClick={() => setMobileTab('route')}
+                  className={`flex-1 py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    mobileTab === 'route'
+                      ? 'bg-[#0284c7] text-white shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  {t === 'streets' ? 'Primary' : t === 'topo' ? 'Topographic' : 'Satellite'}
+                  <Route className="w-3.5 h-3.5" />
+                  <span>Route</span>
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setMobileTab('telemetry')}
+                  className={`flex-1 py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    mobileTab === 'telemetry'
+                      ? 'bg-[#0284c7] text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>Telemetry</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMobileTab('hazards')}
+                  className={`flex-1 py-2.5 px-2 rounded-xl text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    mobileTab === 'hazards'
+                      ? 'bg-[#0284c7] text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Hazards</span>
+                  {hazards.length > 0 && (
+                    <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.2 rounded-full font-bold">
+                      {hazards.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+
             </div>
 
-            {activeRoute ? (
-              <>
-                {/* TOTAL TRANSIT DISTANCE */}
-                <div className="space-y-1 pt-1">
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-                    TOTAL TRANSIT DISTANCE
-                  </span>
-                  <div className="flex items-center justify-between">
-                    <span className="text-2xl font-black text-slate-900 dark:text-white">
-                      {activeRoute.distanceKm} <span className="text-xs font-bold text-slate-500 dark:text-slate-400">KM</span>
-                    </span>
-                    <div className="flex items-end space-x-0.5 h-5">
-                      <div className="w-1 bg-blue-500 h-2 rounded-t" />
-                      <div className="w-1 bg-blue-500 h-4 rounded-t" />
-                      <div className="w-1 bg-blue-500 h-5 rounded-t" />
-                      <div className="w-1 bg-blue-500 h-3 rounded-t" />
+            {/* COLUMN 3: RIGHT CORRIDOR TELEMETRY PANEL */}
+            <div className={`order-3 lg:col-span-3 space-y-3.5 ${mobileTab === 'telemetry' || mobileTab === 'hazards' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'}`}>
+              
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3.5 font-sans">
+                
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-6 h-6 rounded-lg bg-blue-50 dark:bg-blue-950/60 flex items-center justify-center text-[#0284c7]">
+                      <Radio className="w-3.5 h-3.5" />
                     </div>
-                  </div>
-                </div>
-
-                {/* ESTIMATED ETA */}
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-                    ESTIMATED ETA
-                  </span>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xl font-bold text-slate-900 dark:text-white">
-                      {activeRoute.durationText}
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">
+                      Corridor Telemetry
                     </span>
-                    <div className="flex items-end space-x-0.5 h-5">
-                      <div className="w-1 bg-cyan-500 h-3 rounded-t" />
-                      <div className="w-1 bg-cyan-500 h-5 rounded-t" />
-                      <div className="w-1 bg-cyan-500 h-4 rounded-t" />
-                      <div className="w-1 bg-cyan-500 h-2 rounded-t" />
-                    </div>
                   </div>
-                </div>
-
-                {/* SAFE CORRIDOR INDEX (SCI) THREAT SCORE GAUGE */}
-                <div className="space-y-1.5 pt-0.5">
-                  <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">
-                    <span className="flex items-center gap-1">
-                      <span>SAFE CORRIDOR INDEX (SCI)</span>
-                    </span>
-                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-black ${
-                      (activeRoute.sciScore ?? 10) < 25 
-                        ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30' 
-                        : (activeRoute.sciScore ?? 10) < 50 
-                          ? 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30' 
-                          : 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/30'
+                  {activeRoute && (
+                    <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${
+                      activeRoute.isOfflineCached
+                        ? 'text-cyan-700 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-950/60 border-cyan-200 dark:border-cyan-800'
+                        : 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800'
                     }`}>
-                      {activeRoute.sciScore ?? 10} / 100 • {(activeRoute.sciScore ?? 10) < 25 ? 'OPTIMAL' : (activeRoute.sciScore ?? 10) < 50 ? 'CAUTION' : 'HIGH RISK'}
+                      {activeRoute.isOfflineCached ? '⚡ OFFLINE CACHED' : 'LIVE'}
                     </span>
-                  </div>
-                  <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden p-0.5 border border-slate-300 dark:border-slate-700">
-                    <div 
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        (activeRoute.sciScore ?? 10) < 25 
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400' 
-                          : (activeRoute.sciScore ?? 10) < 50 
-                            ? 'bg-gradient-to-r from-amber-500 to-yellow-400' 
-                            : 'bg-gradient-to-r from-rose-500 to-red-600'
-                      }`}
-                      style={{ width: `${Math.max(8, Math.min(100, activeRoute.sciScore ?? 10))}%` }}
-                    />
-                  </div>
+                  )}
                 </div>
 
-                {/* LIVE WEATHER & MONSOON THREAT HUD */}
-                {activeRoute.weather && (
-                  <div className={`p-3 rounded-2xl border text-[11px] space-y-1.5 ${
-                    activeRoute.weather.riskTier === 'critical_monsoon'
-                      ? 'bg-rose-50/80 dark:bg-rose-950/40 border-rose-400 dark:border-rose-800 text-rose-950 dark:text-rose-200'
-                      : activeRoute.weather.riskTier === 'caution'
-                        ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-400 dark:border-amber-800 text-amber-950 dark:text-amber-200'
-                        : 'bg-blue-50/80 dark:bg-slate-800/80 border-blue-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
-                  }`}>
-                    <div className="flex items-center justify-between font-bold uppercase text-[10px]">
-                      <span className="flex items-center space-x-1.5">
-                        <span className="text-sm">{activeRoute.weather.weatherEmoji || '🌤️'}</span>
-                        <span>LIVE CORRIDOR WEATHER</span>
+                {/* Segmented Layer Tabs: PRIMARY | SECONDARY | SATELLITE */}
+                <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/90 dark:border-slate-800">
+                  {['streets', 'topo', 'satellite'].map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setActiveTileStyle(t)}
+                      className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer ${
+                        activeTileStyle === t
+                          ? 'bg-[#0284c7] text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      {t === 'streets' ? 'PRIMARY' : t === 'topo' ? 'SECONDARY' : 'SATELLITE'}
+                    </button>
+                  ))}
+                </div>
+
+                {activeRoute ? (
+                  <>
+                    {/* TOTAL TRANSIT DISTANCE */}
+                    <div className="space-y-1 pt-1">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                        TOTAL TRANSIT DISTANCE
                       </span>
-                      <span className="font-mono text-xs font-black">
-                        {activeRoute.weather.avgTemperature}°C
-                      </span>
+                      <div className="flex items-center justify-between">
+                        <span className="text-2xl font-black text-slate-900 dark:text-white font-mono">
+                          {activeRoute.distanceKm} <span className="text-xs font-bold text-slate-500">KM</span>
+                        </span>
+                        <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900 flex items-center justify-center text-[#0284c7] dark:text-cyan-400 shrink-0 shadow-2xs">
+                          <Route className="w-4 h-4" />
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="flex items-center justify-between text-[10px] font-sans">
-                      <span className="font-bold text-slate-700 dark:text-slate-200">
-                        {activeRoute.weather.dominantWeather || 'Variable Mountain Weather'}
+                    {/* ESTIMATED ETA */}
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                        ESTIMATED ETA
                       </span>
-                      <span className="font-mono font-bold text-blue-600 dark:text-cyan-400">
-                        {activeRoute.weather.maxRainfallMm > 0 ? `🌧️ ${activeRoute.weather.maxRainfallMm} mm/h` : '☀️ 0 mm/h Rain'}
-                      </span>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xl font-bold text-slate-900 dark:text-white font-mono">
+                          {activeRoute.durationText}
+                        </span>
+                        <div className="w-8 h-8 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-100 dark:border-cyan-900 flex items-center justify-center text-cyan-600 dark:text-cyan-400 shrink-0 shadow-2xs">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                      </div>
                     </div>
 
-                    {activeRoute.weather.alertMessage && (
-                      <p className="text-[9.5px] leading-tight opacity-90 italic pt-0.5 border-t border-slate-200/60 dark:border-slate-700/60">
-                        {activeRoute.weather.alertMessage}
-                      </p>
+                    {/* SAFE CORRIDOR INDEX (SCI) */}
+                    <div className="space-y-1.5 pt-0.5 font-mono">
+                      <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">
+                        <span>SAFE CORRIDOR INDEX (SCI)</span>
+                        <span className={`px-1.5 py-0.2 rounded text-[9px] font-black ${
+                          (activeRoute.sciScore ?? 10) < 25 
+                            ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30' 
+                            : (activeRoute.sciScore ?? 10) < 50 
+                              ? 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30' 
+                              : 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/30'
+                        }`}>
+                          {activeRoute.sciScore ?? 10} / 100 • {(activeRoute.sciScore ?? 10) < 25 ? 'OPTIMAL' : (activeRoute.sciScore ?? 10) < 50 ? 'CAUTION' : 'HIGH RISK'}
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden p-0.5 border border-slate-200 dark:border-slate-700">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            (activeRoute.sciScore ?? 10) < 25 
+                              ? 'bg-gradient-to-r from-emerald-500 to-teal-400' 
+                              : (activeRoute.sciScore ?? 10) < 50 
+                                ? 'bg-gradient-to-r from-amber-500 to-yellow-400' 
+                                : 'bg-gradient-to-r from-rose-500 to-red-600'
+                          }`}
+                          style={{ width: `${Math.max(8, Math.min(100, activeRoute.sciScore ?? 10))}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* LIVE WEATHER */}
+                    {activeRoute.weather && (
+                      <div className={`p-3 rounded-2xl border text-[11px] space-y-1.5 ${
+                        activeRoute.weather.riskTier === 'critical_monsoon'
+                          ? 'bg-rose-50/80 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-950 dark:text-rose-200'
+                          : activeRoute.weather.riskTier === 'caution'
+                            ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-200'
+                            : 'bg-blue-50/80 dark:bg-slate-800/80 border-blue-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                      }`}>
+                        <div className="flex items-center justify-between font-bold uppercase text-[10px]">
+                          <span className="flex items-center space-x-1.5">
+                            <span className="text-sm">{activeRoute.weather.weatherEmoji || '🌤️'}</span>
+                            <span>LIVE WEATHER</span>
+                          </span>
+                          <span className="font-mono text-xs font-black">
+                            {activeRoute.weather.avgTemperature}°C
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="font-bold text-slate-700 dark:text-slate-200">
+                            {activeRoute.weather.dominantWeather || 'Variable Weather'}
+                          </span>
+                          <span className="font-mono font-bold text-[#0284c7] dark:text-cyan-400">
+                            {activeRoute.weather.maxRainfallMm > 0 ? `🌧️ ${activeRoute.weather.maxRainfallMm} mm/h` : '☀️ 0 mm/h Rain'}
+                          </span>
+                        </div>
+                      </div>
                     )}
+
+                    {/* GEOSPATIAL SAFETY AUDIT */}
+                    <div className={`border rounded-2xl p-3 text-[11px] space-y-1.5 ${
+                      (activeRoute.flaggedHazards?.length || 0) === 0
+                        ? 'bg-emerald-50/90 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-950 dark:text-emerald-200'
+                        : 'bg-rose-50/90 dark:bg-rose-950/50 border-rose-300 dark:border-rose-800 text-rose-950 dark:text-rose-200'
+                    }`}>
+                      <div className="flex items-center justify-between font-bold uppercase text-[10px]">
+                        <span className="flex items-center space-x-1">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
+                          <span>SAFETY AUDIT</span>
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${
+                          (activeRoute.flaggedHazards?.length || 0) === 0
+                            ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 border-emerald-300'
+                            : 'bg-rose-100 dark:bg-rose-900 text-rose-800 dark:text-rose-200 border-rose-300'
+                        }`}>
+                          {(activeRoute.flaggedHazards?.length || 0) === 0 ? '100% CLEAR' : 'HIGH RISK'}
+                        </span>
+                      </div>
+                      {(activeRoute.flaggedHazards?.length || 0) > 0 ? (
+                        <div className="text-[10px] text-rose-800 dark:text-rose-300 font-bold">
+                          ⚠️ {activeRoute.flaggedHazards.length} danger perimeters along route.
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-emerald-800 dark:text-emerald-300 leading-tight">
+                          Zero active roadblocks or landslides detected along this route.
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="py-8 text-center text-slate-400 dark:text-slate-500 font-sans text-xs space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-blue-50/60 dark:bg-slate-800/60 border border-blue-100/80 dark:border-slate-700 flex items-center justify-center mx-auto text-[#0284c7]">
+                      <Navigation className="w-6 h-6 rotate-45" />
+                    </div>
+                    <p className="font-medium text-slate-500 dark:text-slate-400 text-xs max-w-[200px] mx-auto leading-relaxed">
+                      Select an Origin and Destination Hub to compute mountain transit distance & hazard telemetry.
+                    </p>
                   </div>
                 )}
 
-                {/* CORRIDOR SAFETY CHECK (Adaptive HUD Box) */}
-                <div className={`border rounded-2xl p-3 text-[11px] space-y-1.5 ${
-                  (activeRoute.flaggedHazards?.length || 0) === 0
-                    ? 'bg-emerald-50/90 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-950 dark:text-emerald-200'
-                    : 'bg-rose-50/90 dark:bg-rose-950/50 border-rose-300 dark:border-rose-800 text-rose-950 dark:text-rose-200'
-                }`}>
-                  <div className="flex items-center justify-between font-bold uppercase text-[10px]">
-                    <span className="flex items-center space-x-1">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
-                      <span>GEOSPATIAL SAFETY AUDIT</span>
-                    </span>
-                    <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${
-                      (activeRoute.flaggedHazards?.length || 0) === 0
-                        ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700'
-                        : 'bg-rose-100 dark:bg-rose-900 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-700'
-                    }`}>
-                      {(activeRoute.flaggedHazards?.length || 0) === 0 ? '100% CLEAR' : 'HIGH RISK'}
-                    </span>
-                  </div>
-
-                  {(activeRoute.flaggedHazards?.length || 0) > 0 ? (
-                    <div className="space-y-1.5">
-                      <div className="font-bold text-rose-800 dark:text-rose-300 text-[10px] flex items-center space-x-1">
-                        <AlertTriangle className="w-3 h-3 text-rose-600 dark:text-rose-400 shrink-0" />
-                        <span>{activeRoute.flaggedHazards.length} THREAT PERIMETER(S) BREACHED:</span>
-                      </div>
-                      <div className="space-y-1.5">
-                        {activeRoute.flaggedHazards.map((h, i) => {
-                          const impactRad = h.impactRadiusKm || h.impact_radius_km || 5.0;
-                          return (
-                            <div key={h.id || i} className="text-[10px] text-rose-900 dark:text-rose-200 bg-white/90 dark:bg-slate-900/90 p-2 rounded-xl border border-rose-200 dark:border-rose-800 space-y-1 shadow-2xs">
-                              <div className="flex items-center justify-between font-bold">
-                                <span className="flex items-center gap-1.5 truncate text-rose-900 dark:text-rose-100">
-                                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
-                                  <span className="truncate">{h.title || (h.hazard_type ? h.hazard_type.replace(/_/g, ' ').toUpperCase() : 'Hazard')}</span>
-                                </span>
-                                <span className="text-[8px] px-1.5 py-0.2 rounded font-extrabold uppercase bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-700">
-                                  {h.severity?.toUpperCase()}
-                                </span>
-                              </div>
-                              <div className="text-[9px] text-rose-700 dark:text-rose-400 font-mono">
-                                ⚠️ Breached: {h.distanceFromRouteKm} km from epicenter (radius: {impactRad} km)
-                              </div>
-                              {h.description && (
-                                <div className="text-[9px] text-slate-600 dark:text-slate-400 italic line-clamp-1">
-                                  {h.description}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-[10px] text-emerald-800 dark:text-emerald-300 font-medium space-y-0.5">
-                      <div className="flex items-center space-x-1 font-bold text-emerald-700 dark:text-emerald-400">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <span>Optimal Mountain Transit Corridor</span>
-                      </div>
-                      <p className="text-[10px] text-emerald-700/90 dark:text-emerald-400/90 leading-tight">
-                        Zero active danger perimeters or roadblocks breached along this route.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="py-6 text-center text-slate-400 dark:text-slate-500 font-sans text-xs space-y-2">
-                <Navigation className="w-6 h-6 mx-auto text-slate-300 dark:text-slate-600" />
-                <p className="font-medium text-slate-500 dark:text-slate-400 text-[11px]">
-                  Select an Origin and Destination Hub to compute mountain transit distance & hazard telemetry.
-                </p>
               </div>
-            )}
+
+            </div>
 
           </div>
-
-        </div>
-
-      </div>
-      </>
+        </>
       )}
 
-      {/* Interactive Report Hazard Modal with Map Picking & GPS Integration */}
+      {/* Hazard Report Modal */}
       {hazardModalOpen && (
         <ReportHazardModal
           isOpen={hazardModalOpen}
@@ -1253,7 +1229,7 @@ export default function Home() {
         />
       )}
 
-      {/* Pre-Dispatch Start Journey Manifest Modal */}
+      {/* Start Journey Modal */}
       {isManifestModalOpen && (
         <StartJourneyModal
           isOpen={isManifestModalOpen}
@@ -1271,7 +1247,7 @@ export default function Home() {
         />
       )}
 
-      {/* Floating Tactical AI Copilot Launcher at Bottom-Right Corner */}
+      {/* Tactical AI Floating Assistant */}
       <TacticalAiChatWidget 
         hazards={hazards}
         hubs={hubs}

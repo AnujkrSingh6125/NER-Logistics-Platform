@@ -364,6 +364,45 @@ const STRATEGIC_CORRIDOR_WAYPOINTS = [
 import { fetchRouteWeatherSummary } from './weatherService.js';
 
 /**
+ * Detect if a route contains an unrealistic out-and-back spur (fishhook/dead-end turnaround)
+ * Checks if the vehicle traverses up a road and doubles back over the same road segment
+ */
+export function hasSelfBacktrack(coords, thresholdKm = 0.6) {
+  if (!coords || coords.length < 30) return false;
+
+  const sampleCount = Math.min(100, coords.length);
+  const step = Math.max(1, Math.floor(coords.length / sampleCount));
+  const sampled = [];
+  for (let i = 0; i < coords.length; i += step) {
+    sampled.push({ origIndex: i, pt: coords[i] });
+  }
+
+  for (let i = 0; i < sampled.length - 15; i++) {
+    const ptA = sampled[i].pt;
+    for (let j = i + 12; j < sampled.length; j++) {
+      const ptB = sampled[j].pt;
+      const directDist = getDistanceKm(ptA[0], ptA[1], ptB[0], ptB[1]);
+      if (directDist < thresholdKm) {
+        // Measure the distance traveled along the polyline between ptA and ptB
+        let legDistance = 0;
+        const startIdx = sampled[i].origIndex;
+        const endIdx = sampled[j].origIndex;
+        const innerStep = Math.max(1, Math.floor((endIdx - startIdx) / 25));
+        for (let k = startIdx; k < endIdx - innerStep; k += innerStep) {
+          legDistance += getDistanceKm(coords[k][0], coords[k][1], coords[k + innerStep][0], coords[k + innerStep][1]);
+        }
+        // If the vehicle traveled > 8 km but ended up within 600m of where it was earlier,
+        // it means the route took an out-and-back spur or turnaround!
+        if (legDistance > 8.0) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Universal Multi-Route Corridor Engine
  * Generates genuine, distinct real-world highway alternatives identically to Google Maps.
  * Integrates real-time weather risk sampling and Safe Corridor Index (SCI) scoring.
@@ -376,12 +415,15 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
   // 1. Fetch direct routes from OSRM
   let collected = await fetchOsrm([[sLat, sLng], [eLat, eLng]]);
 
-  // 2. Strict Overlap / Micro-detour Filtering
+  // 2. Strict Overlap / Micro-detour & Backtrack Filtering
   const validatedRaw = [];
   for (let i = 0; i < collected.length; i++) {
     const raw = collected[i];
     let coords = raw.geometry?.coordinates?.map(([lng, lat]) => [lat, lng]);
     if (!coords || coords.length < 2) continue;
+
+    // Eliminate any route that contains a self-intersecting turnaround or spur
+    if (hasSelfBacktrack(coords)) continue;
 
     // Ensure polyline starts exactly at startCoords and ends at endCoords
     coords = ensurePolylineEndpoints(coords, [sLat, sLng], [eLat, eLng]);
@@ -452,7 +494,7 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
     if (domesticBypassRoutes && domesticBypassRoutes.length > 0) {
       const bpRaw = domesticBypassRoutes[0];
       let bpCoords = bpRaw.geometry?.coordinates?.map(([lng, lat]) => [lat, lng]);
-      if (bpCoords && bpCoords.length > 1) {
+      if (bpCoords && bpCoords.length > 1 && !hasSelfBacktrack(bpCoords)) {
         bpCoords = ensurePolylineEndpoints(bpCoords, [sLat, sLng], [eLat, eLng]);
         const bpDistKm = parseFloat((bpRaw.distance / 1000).toFixed(1));
         const bpDurationMin = Math.round(bpRaw.duration / 60);
@@ -473,31 +515,50 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
   if (validatedRaw.length < 2) {
     const primaryDist = validatedRaw[0]?.distKm || directDist;
 
-    // Filter candidate waypoints that are strictly viable along the corridor
-    const candidates = [];
-    const minLat = Math.min(sLat, eLat) - 0.35;
-    const maxLat = Math.max(sLat, eLat) + 0.35;
-    const minLng = Math.min(sLng, eLng) - 0.35;
-    const maxLng = Math.max(sLng, eLng) + 0.35;
+    // Trajectory vector from Origin to Destination
+    const vLat = eLat - sLat;
+    const vLng = eLng - sLng;
+    const vLenSq = vLat * vLat + vLng * vLng;
 
-    STRATEGIC_CORRIDOR_WAYPOINTS.forEach((w) => {
-      const [wLat, wLng] = w.coords;
-      if (wLat >= minLat && wLat <= maxLat && wLng >= minLng && wLng <= maxLng) {
+    const candidates = [];
+    if (vLenSq > 0.0001) {
+      STRATEGIC_CORRIDOR_WAYPOINTS.forEach((w) => {
+        const [wLat, wLng] = w.coords;
         const dS = getDistanceKm(sLat, sLng, wLat, wLng);
         const dE = getDistanceKm(wLat, wLng, eLat, eLng);
-        const detourRatio = (dS + dE) / Math.max(1, directDist);
-        if (detourRatio >= 1.01 && detourRatio <= 1.35) {
-          candidates.push(w.coords);
-        }
-      }
-    });
 
-    for (const waypoint of candidates) {
+        // A. Must not be too close to origin or destination
+        if (dS < 25 || dE < 25) return;
+
+        // B. Must make strict forward progress (cannot be farther from destination than origin is)
+        if (dE >= directDist * 0.90 || dS >= directDist * 0.90) return;
+
+        // C. Projection t of (W - Start) onto (End - Start)
+        const uLat = wLat - sLat;
+        const uLng = wLng - sLng;
+        const projT = (uLat * vLat + uLng * vLng) / vLenSq;
+
+        // Must be in the middle segment (20% to 80%) along the journey trajectory
+        if (projT < 0.20 || projT > 0.80) return;
+
+        // D. Perpendicular deviation from direct trajectory
+        const perpLat = uLat - projT * vLat;
+        const perpLng = uLng - projT * vLng;
+        const perpKm = Math.sqrt(perpLat * perpLat + perpLng * perpLng) * 111.0;
+
+        const detourRatio = (dS + dE) / Math.max(1, directDist);
+        if (detourRatio >= 1.03 && detourRatio <= 1.25 && perpKm <= 65) {
+          candidates.push({ coords: w.coords, name: w.name });
+        }
+      });
+    }
+
+    for (const item of candidates) {
       if (validatedRaw.length >= 3) break;
 
       const altRoutes = await fetchOsrm([
         [sLat, sLng],
-        waypoint,
+        item.coords,
         [eLat, eLng],
       ]);
 
@@ -506,12 +567,17 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
         let altCoords = altRaw.geometry?.coordinates?.map(([lng, lat]) => [lat, lng]);
         if (!altCoords || altCoords.length < 2) continue;
 
+        // Strictly reject any route that takes an out-and-back spur or turnaround
+        if (hasSelfBacktrack(altCoords)) {
+          continue;
+        }
+
         altCoords = ensurePolylineEndpoints(altCoords, [sLat, sLng], [eLat, eLng]);
         const altDistKm = parseFloat((altRaw.distance / 1000).toFixed(1));
         const altDurationMin = Math.round(altRaw.duration / 60);
         const ratio = altDistKm / primaryDist;
 
-        if (ratio >= 1.02 && ratio <= 1.45) {
+        if (ratio >= 1.02 && ratio <= 1.40) {
           const primaryCoords = validatedRaw[0].coords;
           const overlap = calculateRouteOverlap(primaryCoords, altCoords);
 
@@ -523,7 +589,7 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
                 coords: altCoords,
                 distKm: altDistKm,
                 durationMin: altDurationMin,
-                summary: altRaw.legs?.[0]?.summary || `Alternative Highway Corridor ${validatedRaw.length + 1}`,
+                summary: altRaw.legs?.[0]?.summary || item.name || `Alternative Highway Corridor ${validatedRaw.length + 1}`,
               });
             }
           }
@@ -532,69 +598,9 @@ export async function fetchGoogleLikeCorridors(startCoords, endCoords, activeHaz
     }
   }
 
-  // 5. If STILL only 1 route (or network offline), generate geometric highway alternative
-  if (validatedRaw.length === 1) {
-    const primary = validatedRaw[0];
-    const curvedCoords = [];
-    const steps = 30;
-
-    for (let i = 0; i <= steps; i++) {
-      const fraction = i / steps;
-      const lat = sLat + (eLat - sLat) * fraction;
-      const lng = sLng + (eLng - sLng) * fraction;
-      const deviation = Math.sin(fraction * Math.PI) * 0.14;
-      curvedCoords.push([lat + deviation * 0.4, lng + deviation]);
-    }
-
-    const closedCoords = ensurePolylineEndpoints(curvedCoords, [sLat, sLng], [eLat, eLng]);
-    const altDist = parseFloat((primary.distKm * 1.08).toFixed(1));
-    const altDur = Math.round(primary.durationMin * 1.15);
-
-    validatedRaw.push({
-      coords: closedCoords,
-      distKm: altDist,
-      durationMin: altDur,
-      summary: 'Alternative Highway Bypass',
-    });
-  } else if (validatedRaw.length === 0) {
-    // Total offline vector fallback
-    const directDistKm = parseFloat(directDist.toFixed(1));
-    const directDur = Math.round((directDistKm / 50) * 60);
-
-    return [{
-      id: 'corridor-fallback',
-      index: 0,
-      name: 'Primary: Direct Vector Corridor',
-      summary: 'Direct Vector Corridor',
-      corridorName: 'Direct Vector Corridor',
-      coordinates: [[sLat, sLng], [eLat, eLng]],
-      anchorPoint: [(sLat + eLat) / 2, (sLng + eLng) / 2],
-      midpoint: [(sLat + eLat) / 2, (sLng + eLng) / 2],
-      distanceKm: directDistKm,
-      durationMin: directDur,
-      durationSeconds: directDur * 60,
-      durationText: formatTransitDuration(directDur),
-      hazardCount: 0,
-      hazardScore: 0,
-      riskScore: 0,
-      sciScore: 10,
-      weather: {
-        maxRainfallMm: 0,
-        avgTemperature: 24,
-        dominantWeather: 'Clear Sky',
-        weatherEmoji: '☀️',
-        weatherRiskScore: 0,
-        riskTier: 'safe',
-        alertMessage: 'Offline mode active. Road conditions normal.',
-      },
-      flaggedHazards: [],
-      safetyStatus: 'optimal',
-      safetyLabel: 'Safest Corridor (0 Hazards)',
-      tag: 'SHORTEST & SAFEST',
-      primaryTag: 'SHORTEST & SAFEST',
-      isPrimary: true,
-      isRecommendedSafest: true,
-    }];
+  // 5. If no routes were returned by online routing engine, return empty list
+  if (validatedRaw.length === 0) {
+    return [];
   }
 
   // 6. Fetch Live Weather Intelligence in parallel for each candidate corridor

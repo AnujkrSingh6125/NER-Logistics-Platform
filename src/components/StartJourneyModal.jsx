@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import MountainLogo from '@/components/MountainLogo';
 import { supabase } from '@/lib/supabaseClient';
+import { queueOfflineShipment, saveShipmentOffline } from '@/lib/offlineDb';
 
 const CARGO_PRESET_ITEMS = [
   { label: 'Essential Medicines & First Aid', icon: '💙' },
@@ -206,70 +207,79 @@ export default function StartJourneyModal({
         eta: activeRoute?.durationText || '3 hrs 15 mins',
       };
 
-      // 4. Multi-tier Resilient Insert into public.shipments (Supabase)
+      // 4. Multi-tier Resilient Insert into public.shipments (Supabase) + Offline Dexie Fallback
       let savedShipment = { ...baseShipmentRecord };
+      let dbData = null;
+      const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
 
-      // Attempt 1: Full payload
-      let { data: dbData, error: dbError } = await supabase
-        .from('shipments')
-        .insert([baseShipmentRecord])
-        .select()
-        .maybeSingle();
-
-      // Attempt 2: If foreign key error or unmigrated column error, strip relational columns and retry
-      if (dbError) {
-        console.warn('Full shipment payload insert notice, retrying with sanitized payload:', dbError.message);
-        
-        const sanitizedPayload = { ...baseShipmentRecord };
-        delete sanitizedPayload.driver_id;
-        delete sanitizedPayload.origin_hub_id;
-        delete sanitizedPayload.destination_hub_id;
-
-        const retryResult = await supabase
-          .from('shipments')
-          .insert([sanitizedPayload])
-          .select()
-          .maybeSingle();
-
-        if (!retryResult.error && retryResult.data) {
-          dbData = retryResult.data;
-          dbError = null;
-        } else {
-          // Attempt 3: Minimal fallback payload
-          console.warn('Sanitized payload notice, retrying with minimal schema payload:', retryResult.error?.message);
-          const minimalPayload = {
-            tracking_code: trackingCode,
-            cargo_type: cargoType.trim(),
-            status: 'IN_TRANSIT',
-            priority: 'urgent',
-            origin_hub_name: originName,
-            dest_hub_name: destName,
-            current_lat: currentLat,
-            current_lng: currentLng,
-          };
-
-          const minResult = await supabase
+      if (isOnline) {
+        try {
+          // Attempt 1: Full payload
+          let res = await supabase
             .from('shipments')
-            .insert([minimalPayload])
+            .insert([baseShipmentRecord])
             .select()
             .maybeSingle();
 
-          if (!minResult.error && minResult.data) {
-            dbData = minResult.data;
-            dbError = null;
-          } else {
-            console.error('All shipment insert tiers failed:', minResult.error?.message || retryResult.error?.message || dbError.message);
-            throw new Error(`Database error saving shipment: ${(minResult.error || retryResult.error || dbError).message}`);
+          if (res.data) {
+            dbData = res.data;
+          } else if (res.error) {
+            console.warn('Full shipment payload insert notice, retrying with sanitized payload:', res.error.message);
+            const sanitizedPayload = { ...baseShipmentRecord };
+            delete sanitizedPayload.driver_id;
+            delete sanitizedPayload.origin_hub_id;
+            delete sanitizedPayload.destination_hub_id;
+
+            let retryResult = await supabase
+              .from('shipments')
+              .insert([sanitizedPayload])
+              .select()
+              .maybeSingle();
+
+            if (retryResult.data) {
+              dbData = retryResult.data;
+            } else {
+              // Attempt 3: Minimal fallback payload
+              console.warn('Sanitized payload notice, retrying with minimal schema payload:', retryResult.error?.message);
+              const minimalPayload = {
+                tracking_code: trackingCode,
+                cargo_type: cargoType.trim(),
+                status: 'IN_TRANSIT',
+                priority: 'urgent',
+                origin_hub_name: originName,
+                dest_hub_name: destName,
+                current_lat: currentLat,
+                current_lng: currentLng,
+              };
+
+              let minResult = await supabase
+                .from('shipments')
+                .insert([minimalPayload])
+                .select()
+                .maybeSingle();
+
+              if (minResult.data) {
+                dbData = minResult.data;
+              }
+            }
           }
+        } catch (fetchErr) {
+          console.warn('Network unavailable during dispatch, using local offline Dexie queue:', fetchErr);
         }
       }
 
       if (dbData?.id) {
         savedShipment.id = dbData.id;
+        saveShipmentOffline(savedShipment).catch(() => {});
+      } else {
+        // Zero-connectivity / Offline Mode Dispatch
+        savedShipment.id = `shp-offline-${Date.now()}`;
+        savedShipment.is_offline_dispatched = true;
+        await queueOfflineShipment(savedShipment);
       }
 
       // 5. Update Active Duty State on public.driver_profiles
-      if (user?.id) {
+      if (user?.id && isOnline) {
         try {
           await supabase
             .from('driver_profiles')
