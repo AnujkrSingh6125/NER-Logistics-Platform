@@ -24,6 +24,7 @@ import {
 import MountainLogo from '@/components/MountainLogo';
 import { supabase } from '@/lib/supabaseClient';
 import { queueOfflineShipment, saveShipmentOffline } from '@/lib/offlineDb';
+import SearchableHubSelect from '@/components/SearchableHubSelect';
 
 const CARGO_PRESET_ITEMS = [
   { label: 'Essential Medicines & First Aid', icon: '💙' },
@@ -704,55 +705,43 @@ export default function StartJourneyModal({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Origin Facility */}
-                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 rounded-2xl p-2.5 flex items-center gap-2.5">
-                  <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 shrink-0">
-                    <MapPin className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="block text-[9.5px] font-semibold text-slate-400 dark:text-slate-400">
-                      Origin Facility <span className="text-rose-500">*</span>
-                    </span>
-                    <select
-                      value={selectedOriginId}
-                      onChange={(e) => setSelectedOriginId(e.target.value)}
-                      className="w-full bg-transparent text-xs text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer truncate"
-                    >
-                      <option value="CURRENT_LOCATION" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
-                        My Current Location (Live GPS)
-                      </option>
-                      {hubs.map((hub) => (
-                        <option key={`orig-${hub.id || hub.hub_code}`} value={hub.id || hub.hub_code} className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
-                          {hub.hub_name} ({hub.hub_code}) - {hub.state}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span>Origin Facility</span>
+                    <span className="text-rose-500">*</span>
+                  </label>
+                  <SearchableHubSelect
+                    hubs={hubs}
+                    value={selectedOriginId}
+                    onChange={(val) => setSelectedOriginId(val)}
+                    placeholder="Search Origin Hub (50 Facilities)..."
+                    allowCurrentLocation={true}
+                    disabledValue={selectedDestId}
+                    disabledTooltip="Selected as Dest"
+                    accentColor="emerald"
+                    id="modal-origin-hub-search-select"
+                  />
                 </div>
 
                 {/* Destination Hub */}
-                <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 rounded-2xl p-2.5 flex items-center gap-2.5">
-                  <div className="p-2 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
-                    <MapPin className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="block text-[9.5px] font-semibold text-slate-400 dark:text-slate-400">
-                      Destination Hub <span className="text-rose-500">*</span>
-                    </span>
-                    <select
-                      value={selectedDestId}
-                      onChange={(e) => setSelectedDestId(e.target.value)}
-                      className="w-full bg-transparent text-xs text-slate-800 dark:text-slate-100 font-bold focus:outline-none cursor-pointer truncate"
-                    >
-                      <option value="" className="bg-white dark:bg-slate-800 text-slate-500">
-                        -- Select Destination Facility --
-                      </option>
-                      {hubs.map((hub) => (
-                        <option key={`dest-${hub.id || hub.hub_code}`} value={hub.id || hub.hub_code} className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
-                          {hub.hub_name} ({hub.hub_code}) - {hub.state}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-rose-500" />
+                    <span>Destination Hub</span>
+                    <span className="text-rose-500">*</span>
+                  </label>
+                  <SearchableHubSelect
+                    hubs={hubs}
+                    value={selectedDestId}
+                    onChange={(val) => setSelectedDestId(val)}
+                    placeholder="Search Destination Hub (50 Facilities)..."
+                    allowCurrentLocation={false}
+                    disabledValue={selectedOriginId}
+                    disabledTooltip="Selected as Origin"
+                    accentColor="rose"
+                    id="modal-dest-hub-search-select"
+                  />
                 </div>
               </div>
             </div>

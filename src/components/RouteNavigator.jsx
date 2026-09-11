@@ -19,6 +19,8 @@ import {
   Info
 } from 'lucide-react';
 
+import SearchableHubSelect from '@/components/SearchableHubSelect';
+
 export default function RouteNavigator({
   hubs = [],
   originHubId = '',
@@ -63,7 +65,7 @@ export default function RouteNavigator({
         </span>
       </div>
 
-      {/* 2. ORIGIN & DESTINATION DROPDOWNS */}
+      {/* 2. ORIGIN & DESTINATION DROPDOWNS (WITH SEARCH) */}
       <div className="space-y-3">
         {/* Origin Selector */}
         <div>
@@ -79,25 +81,17 @@ export default function RouteNavigator({
               </span>
             )}
           </label>
-          <select
+          <SearchableHubSelect
+            hubs={hubs}
             value={originHubId}
-            onChange={(e) => onSelectOrigin && onSelectOrigin(e.target.value)}
-            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800 rounded-xl py-2.5 px-3 text-xs text-slate-800 dark:text-slate-200 font-sans focus:outline-none focus:ring-1 focus:ring-[#0284c7] cursor-pointer truncate min-h-[44px]"
-          >
-            <option value="">Select Origin Hub (50 Facilities)</option>
-            <option value="CURRENT_LOCATION" className="font-bold text-[#0284c7] dark:text-cyan-400">
-              📍 My Current Location (Live GPS Position)
-            </option>
-            {hubs.map((h) => {
-              const val = h.hub_code || h.id;
-              const isDisabled = val === destHubId;
-              return (
-                <option key={`orig-${val}`} value={val} disabled={isDisabled}>
-                  {h.state}: {h.hub_name} ({h.hub_code}){isDisabled ? ' (Selected as Dest)' : ''}
-                </option>
-              );
-            })}
-          </select>
+            onChange={(val) => onSelectOrigin && onSelectOrigin(val)}
+            placeholder="Search Origin Hub (50 Facilities)..."
+            allowCurrentLocation={true}
+            disabledValue={destHubId}
+            disabledTooltip="Selected as Dest"
+            accentColor="emerald"
+            id="origin-hub-search-select"
+          />
         </div>
 
         {/* Destination Selector */}
@@ -106,22 +100,17 @@ export default function RouteNavigator({
             <span className="w-2 h-2 rounded-full bg-rose-500" />
             <span>Destination Supply Hub</span>
           </label>
-          <select
+          <SearchableHubSelect
+            hubs={hubs}
             value={destHubId}
-            onChange={(e) => onSelectDestination && onSelectDestination(e.target.value)}
-            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800 rounded-xl py-2.5 px-3 text-xs text-slate-800 dark:text-slate-200 font-sans focus:outline-none focus:ring-1 focus:ring-[#0284c7] cursor-pointer truncate min-h-[44px]"
-          >
-            <option value="">Select Destination Hub (50 Facilities)</option>
-            {hubs.map((h) => {
-              const val = h.hub_code || h.id;
-              const isDisabled = val === originHubId;
-              return (
-                <option key={`dest-${val}`} value={val} disabled={isDisabled}>
-                  {h.state}: {h.hub_name} ({h.hub_code}){isDisabled ? ' (Selected as Origin)' : ''}
-                </option>
-              );
-            })}
-          </select>
+            onChange={(val) => onSelectDestination && onSelectDestination(val)}
+            placeholder="Search Destination Hub (50 Facilities)..."
+            allowCurrentLocation={false}
+            disabledValue={originHubId}
+            disabledTooltip="Selected as Origin"
+            accentColor="rose"
+            id="dest-hub-search-select"
+          />
         </div>
       </div>
 

@@ -312,40 +312,105 @@ export default function ReportHazardModal({
     }
   };
 
-  // Fetch live browser GPS location
-  const fetchLocation = () => {
+  // 8 North-Eastern State Command Centroids (Fallback for calibration)
+  const STATE_CENTROIDS = {
+    'Assam': { lat: 26.1445, lng: 91.7362, name: 'Guwahati Central Depot, Assam' },
+    'Arunachal Pradesh': { lat: 27.0844, lng: 93.6053, name: 'Itanagar Relief Center, Arunachal' },
+    'Meghalaya': { lat: 25.5788, lng: 91.8933, name: 'Shillong Medical Hub, Meghalaya' },
+    'Manipur': { lat: 24.8170, lng: 93.9368, name: 'Imphal Central Depot, Manipur' },
+    'Mizoram': { lat: 23.7271, lng: 92.7176, name: 'Aizawl State Storage, Mizoram' },
+    'Nagaland': { lat: 25.6751, lng: 94.1086, name: 'Kohima Central Depot, Nagaland' },
+    'Tripura': { lat: 23.8315, lng: 91.2868, name: 'Agartala Central Hub, Tripura' },
+    'Sikkim': { lat: 27.3389, lng: 88.6065, name: 'Gangtok Relief Hub, Sikkim' },
+  };
+
+  // Multi-tier resilient live GPS & Geolocation resolver
+  const fetchLocation = async () => {
     setLocating(true);
     setErrorMsg(null);
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setErrorMsg('Geolocation is not supported by your browser.');
+
+    const applyCoords = (lat, lng, sourceLabel = 'GPS') => {
+      const latVal = parseFloat(Number(lat).toFixed(6));
+      const lngVal = parseFloat(Number(lng).toFixed(6));
+      setCoords({ lat: latVal, lng: lngVal });
+      setLatInput(latVal.toString());
+      setLngInput(lngVal.toString());
       setLocating(false);
-      return;
+      setCoordMode('gps');
+    };
+
+    // Helper: Promise wrapper around navigator.geolocation with custom timeout
+    const getBrowserPosition = (enableHighAccuracy, timeoutMs) => {
+      return new Promise((resolve, reject) => {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) {
+          return reject(new Error('Geolocation not supported'));
+        }
+        const timer = setTimeout(() => {
+          reject(new Error('GPS request timed out'));
+        }, timeoutMs + 500);
+
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            clearTimeout(timer);
+            resolve(pos);
+          },
+          (err) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+          { enableHighAccuracy, timeout: timeoutMs, maximumAge: enableHighAccuracy ? 3000 : 300000 }
+        );
+      });
+    };
+
+    // Tier 1: Try High-Accuracy Hardware GPS (5s timeout)
+    try {
+      const pos1 = await getBrowserPosition(true, 5000);
+      if (pos1?.coords?.latitude && pos1?.coords?.longitude) {
+        applyCoords(pos1.coords.latitude, pos1.coords.longitude, 'High-Precision GPS');
+        return;
+      }
+    } catch (err1) {
+      console.warn('Tier 1 high-accuracy GPS note:', err1);
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const latVal = parseFloat(pos.coords.latitude.toFixed(6));
-        const lngVal = parseFloat(pos.coords.longitude.toFixed(6));
-        setCoords({ lat: latVal, lng: lngVal });
-        setLatInput(latVal.toString());
-        setLngInput(lngVal.toString());
-        setLocating(false);
-        setCoordMode('gps');
-      },
-      (err) => {
-        if (err?.code === 1 /* PERMISSION_DENIED */) {
-          setErrorMsg('Location permission was denied. Please allow location permissions in your browser or click on the map to set coordinates.');
-        } else if (err?.code === 2 /* POSITION_UNAVAILABLE */) {
-          setErrorMsg('GPS location unavailable. Please select your location on the map.');
-        } else if (err?.code === 3 /* TIMEOUT */) {
-          setErrorMsg('GPS location timed out. Please try again or select your location on the map.');
-        } else {
-          setErrorMsg('Could not fetch GPS location: ' + (err?.message || 'Unknown error.'));
+    // Tier 2: Try Fast Standard Accuracy / Cell Tower / WiFi Positioning (5s timeout)
+    try {
+      const pos2 = await getBrowserPosition(false, 5000);
+      if (pos2?.coords?.latitude && pos2?.coords?.longitude) {
+        applyCoords(pos2.coords.latitude, pos2.coords.longitude, 'Standard GPS');
+        return;
+      }
+    } catch (err2) {
+      console.warn('Tier 2 standard geolocation note:', err2);
+    }
+
+    // Tier 3: Try Fast IP-Based Geolocation API (3s timeout)
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const ipRes = await fetch('https://get.geojs.io/v1/ip/geo.json', { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (ipRes.ok) {
+        const ipData = await ipRes.json();
+        if (ipData.latitude && ipData.longitude) {
+          const lat = parseFloat(ipData.latitude);
+          const lng = parseFloat(ipData.longitude);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            applyCoords(lat, lng, 'Network IP Location');
+            return;
+          }
         }
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+      }
+    } catch (err3) {
+      console.warn('Tier 3 IP geolocation note:', err3);
+    }
+
+    // Tier 4: Regional State Command Fallback if device location is denied / unavailable
+    const targetState = state || effectiveProfile?.state || nodalOfficer?.state || 'Assam';
+    const fallbackPoint = STATE_CENTROIDS[targetState] || STATE_CENTROIDS['Assam'];
+    applyCoords(fallbackPoint.lat, fallbackPoint.lng, 'State Hub Fallback');
+    setErrorMsg(`📍 Device GPS unavailable. Calibrated coordinates to ${fallbackPoint.name}. You can edit or pin on map if needed.`);
   };
 
   // Automatic Real-World Reverse Geocoding Effect
