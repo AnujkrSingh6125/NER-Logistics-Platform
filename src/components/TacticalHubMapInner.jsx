@@ -600,7 +600,7 @@ export default function TacticalHubMapInner({
               combined.push({
                 id: s.id || `ship-${s.tracking_code}`,
                 driver_id: s.driver_id,
-                driver_code: s.driver_code || d?.driver_code || 'DRV-NER-4921',
+                driver_code: s.driver_code || d?.driver_code || `DRV-NER-${(s.driver_id || '4921').slice(0, 4).toUpperCase()}`,
                 driver_name: s.driver_name || d?.full_name || 'Field Operator',
                 driver_phone: s.driver_phone || d?.phone || '+91-94350-00000',
                 vehicle_number: d?.vehicle_number || s.vehicle_number || 'AS-01-AX-9921',
@@ -617,32 +617,6 @@ export default function TacticalHubMapInner({
                 tracking_code: s.tracking_code,
               });
               if (s.driver_id) seenDriverIds.add(s.driver_id);
-            }
-          });
-        }
-
-        if (isNodalOfficer) {
-          driversMap.forEach((d, id) => {
-            if (!seenDriverIds.has(id) && d.current_latitude && d.current_longitude && d.is_active_duty) {
-              combined.push({
-                id: id,
-                driver_id: id,
-                driver_code: d.driver_code || `DRV-NER-${id.slice(0, 4).toUpperCase()}`,
-                driver_name: d.full_name || 'Field Operator',
-                driver_phone: d.phone || '+91-94350-00000',
-                vehicle_number: d.vehicle_number || 'AS-01-AX-9921',
-                cargo_type: 'General Relief Consignment',
-                cargo_weight_val: 12.5,
-                cargo_weight_unit: 'MT',
-                origin_hub_name: 'Guwahati Hub',
-                dest_hub_name: 'Field Corridor',
-                current_lat: d.current_latitude,
-                current_lng: d.current_longitude,
-                last_ping: d.last_ping || d.last_telemetry_at || new Date().toISOString(),
-                last_telemetry_at: d.last_ping || d.last_telemetry_at || new Date().toISOString(),
-                status: 'IN_TRANSIT',
-                tracking_code: `TRK-${d.driver_code || id.slice(0, 6)}`,
-              });
             }
           });
         }
@@ -1236,8 +1210,8 @@ export default function TacticalHubMapInner({
         )}
       </MapContainer>
 
-      {/* Dedicated Tactical Driver Tracking Search Bar (Government / Nodal Portal Only) */}
-      {effectiveIsNodal && (
+      {/* Dedicated Tactical Driver Tracking Search Bar (Strictly Nodal Officers View and only when active convoys > 0) */}
+      {effectiveIsNodal && activeDrivers.length > 0 && (
         <div className="absolute top-3 left-14 z-[400] max-w-[calc(100%-110px)] sm:w-80 font-mono text-xs">
           <div className="relative">
             <div className="flex items-center bg-slate-950/95 backdrop-blur-md border border-cyan-800/80 hover:border-cyan-500 rounded-xl px-2.5 py-1.5 shadow-xl transition-all">
