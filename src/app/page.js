@@ -385,22 +385,38 @@ export default function Home() {
         .neq('status', 'resolved')
         .order('created_at', { ascending: false });
 
-      let combined = Array.isArray(data) ? [...data] : [];
+      if (!error && Array.isArray(data)) {
+        // Online: Supabase database is the absolute source of truth
+        let combined = [...data];
 
-      // Check Dexie IndexedDB for offline queued hazards (ignore deleted)
-      try {
-        const offlineHazards = await db.offline_hazard_queue.where('synced').equals(0).toArray();
-        if (Array.isArray(offlineHazards) && offlineHazards.length > 0) {
-          offlineHazards.forEach(offH => {
-            const isDeleted = delCache.includes(offH.id);
-            if (!isDeleted && !combined.some(h => h.id === offH.id)) {
-              combined.unshift(offH);
+        // Sync local offline cache with Supabase
+        try {
+          if (db.road_hazards) {
+            await db.road_hazards.clear();
+            if (data.length > 0) {
+              await db.road_hazards.bulkPut(data);
             }
-          });
+          }
+        } catch (e) {}
+
+        // Filter out permanently deleted hazards
+        if (delCache.length > 0) {
+          combined = combined.filter(h => !delCache.includes(h.id));
+        }
+
+        setHazards(combined);
+        return;
+      }
+
+      // Offline fallback only when network error occurs
+      let combined = [];
+      try {
+        const offlineHazards = await db.road_hazards.toArray();
+        if (Array.isArray(offlineHazards) && offlineHazards.length > 0) {
+          combined = offlineHazards.filter(h => (h.status || '').toLowerCase() !== 'resolved');
         }
       } catch (e) {}
 
-      // Filter out permanently deleted hazards
       if (delCache.length > 0) {
         combined = combined.filter(h => !delCache.includes(h.id));
       }
@@ -408,16 +424,7 @@ export default function Home() {
       setHazards(combined);
     } catch (err) {
       console.warn('Hazards fetch notice:', err);
-      try {
-        const offlineHazards = await db.road_hazards.toArray();
-        if (offlineHazards && offlineHazards.length > 0) {
-          setHazards(offlineHazards.filter(h => (h.status || '').toLowerCase() !== 'resolved'));
-        } else {
-          setHazards([]);
-        }
-      } catch (e) {
-        setHazards([]);
-      }
+      setHazards([]);
     }
   }, []);
 
@@ -1001,13 +1008,11 @@ export default function Home() {
           <ShipmentsView 
             shipments={shipmentsList}
             onSelectShipmentOnMap={(shipment) => {
-              if (isNodalOfficer || profile?.role === 'nodal_officer' || nodalOfficer) {
-                const lat = parseFloat(shipment.current_lat || shipment.origin_lat || shipment.current_latitude || 26.14);
-                const lng = parseFloat(shipment.current_lng || shipment.origin_lng || shipment.current_longitude || 91.73);
-                if (!isNaN(lat) && !isNaN(lng)) {
-                  setCurrentView('command');
-                  focusOnMap([lat, lng], 14, shipment);
-                }
+              const lat = parseFloat(shipment.current_lat || shipment.origin_lat || shipment.current_latitude || 26.14);
+              const lng = parseFloat(shipment.current_lng || shipment.origin_lng || shipment.current_longitude || 91.73);
+              if (!isNaN(lat) && !isNaN(lng)) {
+                setCurrentView('command');
+                focusOnMap([lat, lng], 14, shipment);
               }
             }} 
           />

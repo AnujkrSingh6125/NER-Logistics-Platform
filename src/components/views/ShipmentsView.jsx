@@ -871,8 +871,8 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                     </div>
 
                     <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
-                      {/* Strictly show Locate ONLY if Nodal Authority AND Convoy is Active In Transit */}
-                      {effectiveIsNodal && statusInfo.canTrack && (
+                      {/* Track Convoy: Active for any In-Transit convoy; Stops when Delivered or Terminated/Deleted */}
+                      {statusInfo.isInTransit && (
                         <button
                           type="button"
                           onClick={() => {
@@ -880,10 +880,11 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                               onSelectShipmentOnMap(s);
                             }
                           }}
-                          className="flex-1 py-2 px-3 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs rounded-full border border-blue-200 dark:border-blue-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
+                          className="flex-1 py-2 px-3 bg-[#0284c7] hover:bg-[#0369a1] active:scale-95 text-white font-bold text-xs rounded-full shadow-xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
+                          title="Track live convoy on GIS map"
                         >
                           <Navigation className="w-3.5 h-3.5" />
-                          <span>Locate Convoy</span>
+                          <span>Track Convoy</span>
                         </button>
                       )}
 
@@ -996,8 +997,8 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                         <td className="py-4 pr-6 text-right">
                           <div className="inline-flex items-center space-x-2">
                             
-                            {/* Locate Action Button - STRICTLY NODAL OFFICER ONLY AND ONLY FOR ACTIVE IN-TRANSIT CONVOYS */}
-                            {effectiveIsNodal && statusInfo.canTrack && (
+                            {/* Track Convoy Action Button - ACTIVE FOR ALL IN-TRANSIT CONVOYS; STOPS ONCE DELIVERED/DELETED */}
+                            {statusInfo.isInTransit && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1005,11 +1006,11 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                                     onSelectShipmentOnMap(s);
                                   }
                                 }}
-                                className="px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs border border-blue-200 dark:border-blue-800 transition-all inline-flex items-center space-x-1.5 cursor-pointer shadow-2xs"
-                                title="Locate live convoy on GIS map (Nodal Authority Only)"
+                                className="px-3.5 py-1.5 rounded-full bg-[#0284c7] hover:bg-[#0369a1] active:scale-95 text-white font-bold text-xs shadow-xs hover:shadow-md transition-all inline-flex items-center space-x-1.5 cursor-pointer"
+                                title="Track live convoy on GIS map"
                               >
                                 <Navigation className="w-3.5 h-3.5" />
-                                <span>Locate</span>
+                                <span>Track Convoy</span>
                               </button>
                             )}
 

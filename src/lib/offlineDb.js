@@ -498,9 +498,11 @@ export async function deleteHazardOffline(hazardId) {
   try {
     if (db.road_hazards) {
       await db.road_hazards.delete(hazardId).catch(() => {});
+      await db.road_hazards.filter(h => h.id === hazardId || h.temp_id === hazardId).delete().catch(() => {});
     }
     if (db.offline_hazard_queue) {
       await db.offline_hazard_queue.where('id').equals(hazardId).delete().catch(() => {});
+      await db.offline_hazard_queue.filter(h => h.id === hazardId || h.temp_id === hazardId).delete().catch(() => {});
     }
   } catch (err) {
     console.warn('Dexie: Failed to delete hazard offline:', err);
