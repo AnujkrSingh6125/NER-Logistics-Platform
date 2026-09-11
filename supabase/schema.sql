@@ -355,6 +355,28 @@ END $$;
 COMMENT ON TABLE public.shipments IS 'Realtime consignment and journey tracking for relief supplies moving across mountain corridors.';
 
 -- ----------------------------------------------------------------------------
+
+-- Compatibility aliases & ownership columns
+ALTER TABLE public.road_hazards 
+    ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+
+ALTER TABLE public.shipments 
+    ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+
+-- Sync ownership columns
+UPDATE public.road_hazards 
+SET created_by = COALESCE(reported_by_id, reported_by),
+    user_id = COALESCE(reported_by_id, reported_by)
+WHERE created_by IS NULL;
+
+UPDATE public.shipments 
+SET created_by = driver_id,
+    user_id = driver_id
+WHERE created_by IS NULL;
+
+-- ----------------------------------------------------------------------------
 -- 3. SPATIAL & PERFORMANCE INDEXES
 -- ----------------------------------------------------------------------------
 
@@ -786,6 +808,7 @@ CREATE POLICY "Allow authenticated delete driver_profiles"
     TO authenticated, anon
     USING (true);
 
+
 -- 7.3 Policy: road_hazards
 DROP POLICY IF EXISTS "Allow authenticated read road_hazards" ON public.road_hazards;
 DROP POLICY IF EXISTS "Allow authenticated insert road_hazards" ON public.road_hazards;
@@ -797,6 +820,9 @@ DROP POLICY IF EXISTS "Allow update on road_hazards" ON public.road_hazards;
 DROP POLICY IF EXISTS "Hazards read access" ON public.road_hazards;
 DROP POLICY IF EXISTS "Drivers can report hazards" ON public.road_hazards;
 DROP POLICY IF EXISTS "Delete hazard permission rule" ON public.road_hazards;
+DROP POLICY IF EXISTS "Allow delete hazards based on role or ownership" ON public.road_hazards;
+DROP POLICY IF EXISTS "Enable delete for users based on ownership" ON public.road_hazards;
+DROP POLICY IF EXISTS "Allow delete hazards" ON public.road_hazards;
 
 CREATE POLICY "Allow authenticated read road_hazards"
     ON public.road_hazards FOR SELECT
@@ -814,10 +840,32 @@ CREATE POLICY "Allow authenticated update road_hazards"
     USING (true)
     WITH CHECK (true);
 
-CREATE POLICY "Delete hazard permission rule"
+-- RESTRICTED DELETION: Creator-Only for field drivers OR Universal for Nodal Officers / Admins
+CREATE POLICY "Allow delete hazards based on role or ownership"
     ON public.road_hazards FOR DELETE
     TO authenticated, anon
-    USING (true);
+    USING (
+        auth.uid() = reported_by_id
+        OR auth.uid() = reported_by
+        OR auth.uid() = created_by
+        OR auth.uid() = user_id
+        OR (
+            EXISTS (
+                SELECT 1 FROM public.nodal_officers
+                WHERE nodal_officers.id = auth.uid()
+                   OR nodal_officers.email = auth.jwt() ->> 'email'
+            )
+        )
+        OR (
+            EXISTS (
+                SELECT 1 FROM public.driver_profiles
+                WHERE driver_profiles.id = auth.uid()
+                  AND (driver_profiles.driver_code ILIKE '%NODAL%' OR driver_profiles.driver_code ILIKE '%ADMIN%')
+            )
+        )
+        OR (auth.jwt() -> 'user_metadata' ->> 'role' IN ('nodal_officer', 'admin', 'officer'))
+        OR (auth.jwt() ->> 'email' IN (SELECT email FROM public.nodal_officers WHERE is_active = true))
+    );
 
 -- 7.4 Policy: supply_hubs
 DROP POLICY IF EXISTS "Allow authenticated read supply_hubs" ON public.supply_hubs;
@@ -849,6 +897,8 @@ DROP POLICY IF EXISTS "Drivers can update own shipment" ON public.shipments;
 DROP POLICY IF EXISTS "Drivers can update their journey" ON public.shipments;
 DROP POLICY IF EXISTS "Drivers can delete own shipment" ON public.shipments;
 DROP POLICY IF EXISTS "Drivers can delete their journey" ON public.shipments;
+DROP POLICY IF EXISTS "Allow delete shipments based on role or ownership" ON public.shipments;
+DROP POLICY IF EXISTS "Enable delete for users based on ownership" ON public.shipments;
 
 CREATE POLICY "Allow authenticated read shipments"
     ON public.shipments FOR SELECT
@@ -866,10 +916,31 @@ CREATE POLICY "Allow authenticated update shipments"
     USING (true)
     WITH CHECK (true);
 
-CREATE POLICY "Allow authenticated delete shipments"
+-- RESTRICTED DELETION: Creator-Only for field drivers OR Universal for Nodal Officers / Admins
+CREATE POLICY "Allow delete shipments based on role or ownership"
     ON public.shipments FOR DELETE
     TO authenticated, anon
-    USING (true);
+    USING (
+        auth.uid() = driver_id
+        OR auth.uid() = user_id
+        OR auth.uid() = created_by
+        OR (
+            EXISTS (
+                SELECT 1 FROM public.nodal_officers
+                WHERE nodal_officers.id = auth.uid()
+                   OR nodal_officers.email = auth.jwt() ->> 'email'
+            )
+        )
+        OR (
+            EXISTS (
+                SELECT 1 FROM public.driver_profiles
+                WHERE driver_profiles.id = auth.uid()
+                  AND (driver_profiles.driver_code ILIKE '%NODAL%' OR driver_profiles.driver_code ILIKE '%ADMIN%')
+            )
+        )
+        OR (auth.jwt() -> 'user_metadata' ->> 'role' IN ('nodal_officer', 'admin', 'officer'))
+        OR (auth.jwt() ->> 'email' IN (SELECT email FROM public.nodal_officers WHERE is_active = true))
+    );
 
 -- ----------------------------------------------------------------------------
 -- 8. STORAGE BUCKET CONFIGURATION (hazard-images)

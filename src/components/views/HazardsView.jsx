@@ -141,17 +141,22 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
   // Delete / Resolve Hazard Handler
   const handleDeleteHazard = async (hazard, e) => {
     e?.stopPropagation();
-    const isMine = user?.id && (hazard.reported_by_id === user.id || hazard.reported_by === user.id);
+    const isMine = user?.id && (
+      hazard.reported_by_id === user.id || 
+      hazard.reported_by === user.id || 
+      hazard.created_by === user.id ||
+      hazard.user_id === user.id
+    );
     const canDelete = isNodalOfficer || isMine;
 
     if (!canDelete) {
-      alert('Access Denied: Drivers can only clear hazards they reported.');
+      alert('Access Denied: Drivers can only delete road hazards they reported.');
       return;
     }
 
     const confirmPrompt = isNodalOfficer && !isMine
-      ? `[GOVERNMENT AUTHORITY OVERRIDE]\nAre you sure you want to resolve and permanently delete "${hazard.title || 'Road Hazard'}" across the 8 NER states?`
-      : `Are you sure you want to clear your hazard report for "${hazard.title || 'Road Hazard'}"?`;
+      ? `[GOVERNMENT AUTHORITY OVERRIDE]\nAre you sure you want to delete this hazard? This action cannot be undone.`
+      : `Are you sure you want to delete this hazard? This action cannot be undone.`;
 
     if (!window.confirm(confirmPrompt)) return;
 
@@ -175,7 +180,6 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
       setDeletingId(null);
     }
   };
-
   return (
     <div className="flex-1 p-3 sm:p-5 lg:p-6 space-y-4 sm:space-y-5 max-w-7xl mx-auto w-full font-sans">
       

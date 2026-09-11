@@ -193,6 +193,24 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
 
   // Action: Terminate & Delete Consignment Record
   const handleDeleteShipment = async (shipment) => {
+    const isMine = user?.id && (
+      shipment.driver_id === user.id || 
+      shipment.user_id === user.id || 
+      shipment.created_by === user.id
+    );
+    const canDelete = isNodalOfficer || isMine;
+
+    if (!canDelete) {
+      alert('Access Denied: Drivers can only delete convoys they created or dispatched.');
+      return;
+    }
+
+    const confirmPrompt = isNodalOfficer && !isMine
+      ? `[GOVERNMENT AUTHORITY OVERRIDE]\nAre you sure you want to delete this convoy? This action cannot be undone.`
+      : `Are you sure you want to delete this convoy? This action cannot be undone.`;
+
+    if (!window.confirm(confirmPrompt)) return;
+
     setActionNotice(`Terminating consignment ${shipment.tracking_code || ''}...`);
     try {
       if (shipment.id) {
@@ -228,7 +246,6 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
       setTimeout(() => setActionNotice(null), 3000);
     }
   };
-
   const displayShipments = liveShipments;
 
   const inTransitCount = displayShipments.filter((s) => {

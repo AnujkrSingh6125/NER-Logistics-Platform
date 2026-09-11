@@ -380,9 +380,9 @@ export default function TacticalHubMapInner({
       return;
     }
 
-    const confirmMsg = isNodal
-      ? `Government Nodal Authority Override:\nAre you sure you want to resolve and delete the hazard "${hazard.title || 'Record'}"? This action will remove it from the regional transit map.`
-      : `Are you sure you want to clear and delete your reported hazard: "${hazard.title || 'Record'}"?`;
+    const confirmMsg = isNodal && !isMine
+      ? `[GOVERNMENT AUTHORITY OVERRIDE]\nAre you sure you want to delete this hazard? This action cannot be undone.`
+      : `Are you sure you want to delete this hazard? This action cannot be undone.`;
 
     if (!window.confirm(confirmMsg)) return;
 
@@ -518,9 +518,16 @@ export default function TacticalHubMapInner({
     }
   }, []);
 
-  // Live Fleet Telemetry: Nodal Officers track all convoys; Drivers track their own active convoy
+  // Live Fleet Telemetry: STRICTLY NODAL-ONLY CONVOY TRACKING
   useEffect(() => {
     async function fetchFleetTelemetry() {
+      // If not a Nodal Officer, strictly do not fetch or display live fleet telemetry
+      if (!effectiveIsNodal) {
+        setActiveDrivers([]);
+        setSelectedRadarDriver(null);
+        setShowDriverDropdown(false);
+        return;
+      }
       try {
         // Query active in-transit shipments
         let shipQuery = supabase
@@ -1097,7 +1104,7 @@ export default function TacticalHubMapInner({
         })}
 
         {/* 4. ACTIVE RELIEF CONVOY FLEET LAYER (Dedicated Telemetry for Nodal Authority Portal) */}
-        {isNodalOfficer && activeDrivers.map((driver) => {
+        {effectiveIsNodal && activeDrivers.map((driver) => {
           const dLat = parseFloat(driver.current_lat || driver.current_latitude);
           const dLng = parseFloat(driver.current_lng || driver.current_longitude);
           if (isNaN(dLat) || isNaN(dLng)) return null;
@@ -1201,7 +1208,7 @@ export default function TacticalHubMapInner({
       </MapContainer>
 
       {/* Dedicated Tactical Driver Tracking Search Bar (Government / Nodal Portal Only) */}
-      {isNodalOfficer && (
+      {effectiveIsNodal && (
         <div className="absolute top-3 left-14 z-[400] max-w-[calc(100%-110px)] sm:w-80 font-mono text-xs">
           <div className="relative">
             <div className="flex items-center bg-slate-950/95 backdrop-blur-md border border-cyan-800/80 hover:border-cyan-500 rounded-xl px-2.5 py-1.5 shadow-xl transition-all">
@@ -1350,7 +1357,7 @@ export default function TacticalHubMapInner({
             <span className="w-3 h-3 rounded-full bg-red-600 border-2 border-white shadow-xs animate-pulse shrink-0" />
             <span>Road Hazards ({filteredHazards.length} Active Alerts)</span>
           </div>
-          {isNodalOfficer && (
+          {effectiveIsNodal && (
             <div className="flex items-center space-x-2 text-cyan-700 dark:text-cyan-400">
               <span className="w-3 h-3 rounded-full bg-slate-900 border-2 border-cyan-400 shadow-xs shrink-0" />
               <span>Live Fleet Radar ({activeDrivers.length} Convoys)</span>

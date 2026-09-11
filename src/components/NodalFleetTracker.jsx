@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { Marker, Popup, Tooltip, Circle } from 'react-leaflet';
 import L from 'leaflet';
 import { Truck, Radio, Navigation, ShieldCheck, Clock, MapPin, AlertCircle } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 // Custom Animated Radar Pulse Driver Icon
 const createDriverIcon = (driverCode) => {
@@ -25,6 +26,7 @@ const createDriverIcon = (driverCode) => {
 };
 
 export default function NodalFleetTracker({ onDriverCountChange }) {
+  const { isNodalOfficer } = useAuth();
   const [activeDrivers, setActiveDrivers] = useState([]);
   const [lastUpdate, setLastUpdate] = useState(null);
   const onDriverCountChangeRef = React.useRef(onDriverCountChange);
@@ -34,6 +36,10 @@ export default function NodalFleetTracker({ onDriverCountChange }) {
   }, [onDriverCountChange]);
 
   useEffect(() => {
+    if (!isNodalOfficer) {
+      setActiveDrivers([]);
+      return;
+    }
     // 1. Initial fetch of active duty drivers
     async function fetchActiveDrivers() {
       try {
@@ -124,6 +130,8 @@ export default function NodalFleetTracker({ onDriverCountChange }) {
       }
     };
   }, []);
+
+  if (!isNodalOfficer) return null;
 
   return (
     <>
