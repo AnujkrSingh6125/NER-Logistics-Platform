@@ -460,13 +460,34 @@ export default function Home() {
     }
   }, [fetchAllHazards, fetchAllShipments]);
 
+  const effectiveIsNodal = Boolean(isNodalOfficer || profile?.role === 'nodal_officer');
+
   // Live computed metrics matching ShipmentsView and HazardsView exactly:
   const inTransitConvoysCount = useMemo(() => {
-    return shipmentsList.filter((s) => {
+    const list = shipmentsList.filter((s) => {
       const st = (s.status || '').toLowerCase();
       return st === 'in_transit' || st === 'in-transit' || st === 'active';
+    });
+    if (effectiveIsNodal) return list.length;
+    return list.filter((s) => {
+      const isMyDriverId = Boolean(user?.id && s.driver_id === user.id);
+      const isMyDriverCode = Boolean(profile?.driver_code && s.driver_code === profile.driver_code);
+      const isMyDriverName = Boolean(profile?.full_name && s.driver_name === profile.full_name);
+      let isMyLocalJourney = false;
+      if (typeof window !== 'undefined') {
+        try {
+          const cached = localStorage.getItem('ner_active_journey');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && (parsed.tracking_code === s.tracking_code || (parsed.id && parsed.id === s.id))) {
+              isMyLocalJourney = true;
+            }
+          }
+        } catch (e) {}
+      }
+      return isMyDriverId || isMyDriverCode || isMyDriverName || isMyLocalJourney;
     }).length;
-  }, [shipmentsList]);
+  }, [shipmentsList, effectiveIsNodal, user?.id, profile?.driver_code, profile?.full_name]);
 
   const activeHazardsCount = useMemo(() => {
     return hazards.filter(h => (h.status || '').toLowerCase() !== 'resolved').length;
@@ -476,18 +497,30 @@ export default function Home() {
     return hazards.filter(h => (h.status || '').toLowerCase() !== 'resolved' && (h.severity || '').toLowerCase() === 'critical').length;
   }, [hazards]);
 
-  // Continuous Telemetry Sync during active journey
+  // Continuous High-Frequency Telemetry Sync during active journey
   useEffect(() => {
-    if (!activeJourney || !userLocation?.coords || !user?.id) return;
+    if (!activeJourney || !user?.id) return;
 
-    const interval = setInterval(async () => {
+    // Start GPS streaming immediately if not tracking
+    if (userLocation?.status === 'idle' && userLocation?.startTracking) {
       try {
-        const [lat, lng] = Array.isArray(userLocation.coords) 
-          ? userLocation.coords 
-          : [userLocation.coords.lat, userLocation.coords.lng];
+        userLocation.startTracking();
+      } catch (e) {}
+    }
 
-        if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
+    const syncTelemetry = async () => {
+      if (!userLocation?.coords) return;
+      const lat = typeof userLocation.coords.lat === 'number' 
+        ? userLocation.coords.lat 
+        : (Array.isArray(userLocation.coords) ? userLocation.coords[0] : null);
+      const lng = typeof userLocation.coords.lng === 'number' 
+        ? userLocation.coords.lng 
+        : (Array.isArray(userLocation.coords) ? userLocation.coords[1] : null);
 
+      if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
+
+      try {
+        // 1. Update driver profile live location & duty status
         await supabase
           .from('driver_profiles')
           .update({
@@ -498,6 +531,7 @@ export default function Home() {
           })
           .eq('id', user.id);
 
+        // 2. Update active shipment record by ID and tracking_code
         if (activeJourney.id) {
           await supabase
             .from('shipments')
@@ -508,13 +542,49 @@ export default function Home() {
             })
             .eq('id', activeJourney.id);
         }
+        if (activeJourney.tracking_code) {
+          await supabase
+            .from('shipments')
+            .update({
+              current_lat: lat,
+              current_lng: lng,
+              updated_at: new Date().toISOString()
+            })
+            .eq('tracking_code', activeJourney.tracking_code);
+        }
+
+        // 3. Update localStorage cache & broadcast live telemetry
+        if (typeof window !== 'undefined') {
+          try {
+            const cached = localStorage.getItem('ner_active_journey');
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              parsed.current_lat = lat;
+              parsed.current_lng = lng;
+              parsed.updated_at = new Date().toISOString();
+              localStorage.setItem('ner_active_journey', JSON.stringify(parsed));
+              localStorage.setItem('ner_active_transit_journey', JSON.stringify(parsed));
+            }
+            window.dispatchEvent(new CustomEvent('ner_journey_updated', { 
+              detail: { 
+                ...activeJourney, 
+                current_lat: lat, 
+                current_lng: lng,
+                lat,
+                lng
+              } 
+            }));
+          } catch (e) {}
+        }
       } catch (err) {
         console.warn('Telemetry ping sync notice:', err);
       }
-    }, 12000);
+    };
 
+    syncTelemetry();
+    const interval = setInterval(syncTelemetry, 4000);
     return () => clearInterval(interval);
-  }, [activeJourney, userLocation?.coords, user?.id]);
+  }, [activeJourney?.id, activeJourney?.tracking_code, userLocation?.coords?.lat, userLocation?.coords?.lng, user?.id]);
 
   // Global event listener for Pin Hazard Location and Open Hazard Modal
   useEffect(() => {

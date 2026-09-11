@@ -223,11 +223,11 @@ export default function RouteNavigator({
               <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
                 <div>
                   <span className="text-slate-400 block text-[9px]">ORIGIN:</span>
-                  <span className="font-bold text-white truncate block">{activeConvoyData.origin_hub_name || 'Assam Depot'}</span>
+                  <span className="font-bold text-white truncate block">{activeConvoyData.origin_hub_name || activeConvoyData.origin || 'Assam Depot'}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[9px]">DESTINATION:</span>
-                  <span className="font-bold text-white truncate block">{activeConvoyData.destination_hub_name || 'Tripura Store'}</span>
+                  <span className="font-bold text-white truncate block">{activeConvoyData.dest_hub_name || activeConvoyData.destination || activeConvoyData.destination_hub_name || 'Regional Supply Depot'}</span>
                 </div>
               </div>
 

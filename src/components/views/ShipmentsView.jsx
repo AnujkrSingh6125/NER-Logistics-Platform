@@ -150,12 +150,31 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
     }, 4000);
 
     const handleJourneyStarted = () => fetchShipments();
+    const handleJourneyUpdated = (e) => {
+      if (e?.detail) {
+        const detail = e.detail;
+        setLiveShipments(prev => prev.map(s => {
+          if ((detail.id && s.id === detail.id) || (detail.tracking_code && s.tracking_code === detail.tracking_code)) {
+            return {
+              ...s,
+              current_lat: detail.current_lat || detail.lat || s.current_lat,
+              current_lng: detail.current_lng || detail.lng || s.current_lng,
+              updated_at: new Date().toISOString()
+            };
+          }
+          return s;
+        }));
+      } else {
+        fetchShipments();
+      }
+    };
     const handleJourneyTerminated = () => fetchShipments();
     const handleJourneyDelivered = () => fetchShipments();
     const handleJourneyDeleted = () => fetchShipments();
 
     if (typeof window !== 'undefined') {
       window.addEventListener('ner_journey_started', handleJourneyStarted);
+      window.addEventListener('ner_journey_updated', handleJourneyUpdated);
       window.addEventListener('ner_journey_terminated', handleJourneyTerminated);
       window.addEventListener('ner_journey_delivered', handleJourneyDelivered);
       window.addEventListener('ner_journey_deleted', handleJourneyDeleted);
@@ -163,6 +182,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         supabase.removeChannel(channel);
         clearInterval(pollTimer);
         window.removeEventListener('ner_journey_started', handleJourneyStarted);
+        window.removeEventListener('ner_journey_updated', handleJourneyUpdated);
         window.removeEventListener('ner_journey_terminated', handleJourneyTerminated);
         window.removeEventListener('ner_journey_delivered', handleJourneyDelivered);
         window.removeEventListener('ner_journey_deleted', handleJourneyDeleted);

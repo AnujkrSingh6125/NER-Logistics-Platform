@@ -547,16 +547,9 @@ export default function TacticalHubMapInner({
     }
   }, []);
 
-  // Live Fleet Telemetry: STRICTLY NODAL-ONLY CONVOY TRACKING
+  // Live Fleet Telemetry: Nodal Officers view all convoys across NER, Field Operators view their own active convoy
   useEffect(() => {
     async function fetchFleetTelemetry() {
-      // If not a Nodal Officer, strictly do not fetch or display live fleet telemetry
-      if (!effectiveIsNodal) {
-        setActiveDrivers([]);
-        setSelectedRadarDriver(null);
-        setShowDriverDropdown(false);
-        return;
-      }
       try {
         // Query active in-transit shipments
         let shipQuery = supabase
@@ -564,7 +557,7 @@ export default function TacticalHubMapInner({
           .select('*')
           .in('status', ['IN_TRANSIT', 'in_transit', 'ACTIVE', 'active']);
 
-        if (!isNodalOfficer && user?.id) {
+        if (!effectiveIsNodal && user?.id) {
           shipQuery = shipQuery.eq('driver_id', user.id);
         }
 
@@ -576,7 +569,7 @@ export default function TacticalHubMapInner({
           .select('*')
           .eq('is_active_duty', true);
 
-        if (!isNodalOfficer && user?.id) {
+        if (!effectiveIsNodal && user?.id) {
           driversQuery = driversQuery.eq('id', user.id);
         }
 
@@ -587,14 +580,19 @@ export default function TacticalHubMapInner({
           driversData.forEach(d => driversMap.set(d.id, d));
         }
 
-        const combined = [];
-        const seenDriverIds = new Set();
+        let combined = [];
 
         if (shipmentsData && shipmentsData.length > 0) {
           shipmentsData.forEach(s => {
             const d = s.driver_id ? driversMap.get(s.driver_id) : null;
-            const lat = s.current_lat || s.current_latitude || d?.current_latitude;
-            const lng = s.current_lng || s.current_longitude || d?.current_longitude;
+            let lat = s.current_lat || s.current_latitude || d?.current_latitude;
+            let lng = s.current_lng || s.current_longitude || d?.current_longitude;
+
+            // If this is the active user's own convoy and userLocation coords are active, use live GPS
+            if (user?.id && s.driver_id === user.id && userLocation?.coords?.lat && userLocation?.coords?.lng) {
+              lat = userLocation.coords.lat;
+              lng = userLocation.coords.lng;
+            }
 
             if (lat && lng) {
               combined.push({
@@ -608,7 +606,7 @@ export default function TacticalHubMapInner({
                 cargo_weight_val: s.cargo_weight_val || s.quantity_tons || 15.0,
                 cargo_weight_unit: s.cargo_weight_unit || 'MT',
                 origin_hub_name: s.origin_hub_name || s.origin || 'Guwahati Central Depot',
-                dest_hub_name: s.dest_hub_name || s.destination_district || 'Regional Supply Depot',
+                dest_hub_name: s.dest_hub_name || s.destination_district || s.destination || 'Regional Supply Depot',
                 current_lat: lat,
                 current_lng: lng,
                 last_ping: s.updated_at || d?.last_ping || d?.last_telemetry_at || new Date().toISOString(),
@@ -616,9 +614,44 @@ export default function TacticalHubMapInner({
                 status: 'IN_TRANSIT',
                 tracking_code: s.tracking_code,
               });
-              if (s.driver_id) seenDriverIds.add(s.driver_id);
             }
           });
+        }
+
+        // Check localStorage for active local journey not yet in database
+        if (typeof window !== 'undefined') {
+          try {
+            const cached = localStorage.getItem('ner_active_journey') || localStorage.getItem('ner_active_transit_journey');
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              if (parsed && (parsed.status === 'IN_TRANSIT' || parsed.status === 'in_transit')) {
+                const isMine = effectiveIsNodal || (user?.id && parsed.driver_id === user.id);
+                if (isMine && !combined.some(c => (parsed.tracking_code && c.tracking_code === parsed.tracking_code) || (parsed.id && c.id === parsed.id))) {
+                  const lat = (userLocation?.coords?.lat) || parsed.current_lat || 26.14;
+                  const lng = (userLocation?.coords?.lng) || parsed.current_lng || 91.73;
+                  combined.push({
+                    id: parsed.id || `local-${parsed.tracking_code}`,
+                    driver_id: parsed.driver_id || user?.id,
+                    driver_code: parsed.driver_code || 'DRV-NER-OPS',
+                    driver_name: parsed.driver_name || 'Field Operator',
+                    driver_phone: parsed.driver_phone || '+91-94350-00000',
+                    vehicle_number: parsed.vehicle_number || 'AS-01-AX-9921',
+                    cargo_type: parsed.cargo_type || 'Emergency Relief Supplies',
+                    cargo_weight_val: parsed.cargo_weight_val || 15.0,
+                    cargo_weight_unit: parsed.cargo_weight_unit || 'MT',
+                    origin_hub_name: parsed.origin_hub_name || parsed.origin || 'Guwahati Central Depot',
+                    dest_hub_name: parsed.dest_hub_name || parsed.destination || 'Regional Supply Depot',
+                    current_lat: lat,
+                    current_lng: lng,
+                    last_ping: new Date().toISOString(),
+                    last_telemetry_at: new Date().toISOString(),
+                    status: 'IN_TRANSIT',
+                    tracking_code: parsed.tracking_code,
+                  });
+                }
+              }
+            }
+          } catch (e) {}
         }
 
         setActiveDrivers(combined);
@@ -645,6 +678,24 @@ export default function TacticalHubMapInner({
       .subscribe();
 
     const handleJourneyUpdate = () => fetchFleetTelemetry();
+    const handleJourneyLiveCoords = (e) => {
+      if (e?.detail) {
+        const detail = e.detail;
+        setActiveDrivers(prev => prev.map(d => {
+          if ((detail.id && d.id === detail.id) || (detail.tracking_code && d.tracking_code === detail.tracking_code) || (!effectiveIsNodal && user?.id && d.driver_id === user.id)) {
+            return {
+              ...d,
+              current_lat: detail.current_lat || detail.lat || d.current_lat,
+              current_lng: detail.current_lng || detail.lng || d.current_lng,
+              last_telemetry_at: new Date().toISOString(),
+            };
+          }
+          return d;
+        }));
+      } else {
+        fetchFleetTelemetry();
+      }
+    };
     const handleJourneyHalted = () => {
       setActiveDrivers([]);
       setSelectedRadarDriver(null);
@@ -654,16 +705,22 @@ export default function TacticalHubMapInner({
 
     if (typeof window !== 'undefined') {
       window.addEventListener('ner_journey_started', handleJourneyUpdate);
+      window.addEventListener('ner_journey_updated', handleJourneyLiveCoords);
       window.addEventListener('ner_journey_completed', handleJourneyHalted);
+      window.addEventListener('ner_journey_delivered', handleJourneyHalted);
+      window.addEventListener('ner_journey_terminated', handleJourneyHalted);
       window.addEventListener('ner_journey_deleted', handleJourneyHalted);
       return () => {
         supabase.removeChannel(channel);
         window.removeEventListener('ner_journey_started', handleJourneyUpdate);
+        window.removeEventListener('ner_journey_updated', handleJourneyLiveCoords);
         window.removeEventListener('ner_journey_completed', handleJourneyHalted);
+        window.removeEventListener('ner_journey_delivered', handleJourneyHalted);
+        window.removeEventListener('ner_journey_terminated', handleJourneyHalted);
         window.removeEventListener('ner_journey_deleted', handleJourneyHalted);
       };
     }
-  }, [effectiveIsNodal, user?.id]);
+  }, [effectiveIsNodal, user?.id, userLocation?.coords?.lat, userLocation?.coords?.lng]);
 
   // Filter matching drivers for tactical search bar
   const matchingDrivers = useMemo(() => {
@@ -1106,8 +1163,8 @@ export default function TacticalHubMapInner({
           );
         })}
 
-        {/* 4. ACTIVE RELIEF CONVOY FLEET LAYER (Dedicated Telemetry for Nodal Authority Portal) */}
-        {effectiveIsNodal && activeDrivers.map((driver) => {
+        {/* 4. ACTIVE RELIEF CONVOY FLEET LAYER (Nodal Authority Fleet Radar + Driver Active Convoy Beacon) */}
+        {activeDrivers.map((driver) => {
           const dLat = parseFloat(driver.current_lat || driver.current_latitude);
           const dLng = parseFloat(driver.current_lng || driver.current_longitude);
           if (isNaN(dLat) || isNaN(dLng)) return null;
@@ -1132,10 +1189,10 @@ export default function TacticalHubMapInner({
                   <div className="flex items-center justify-between pb-1.5 border-b border-cyan-900/60">
                     <div className="flex items-center space-x-1.5 font-bold text-cyan-400 text-[10px] uppercase">
                       <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-                      <span>TACTICAL FLEET TELEMETRY</span>
+                      <span>{effectiveIsNodal ? 'TACTICAL FLEET TELEMETRY' : 'MY ACTIVE CONVOY'}</span>
                     </div>
                     <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-cyan-950 text-cyan-300 border border-cyan-700">
-                      LIVE RADAR
+                      {effectiveIsNodal ? 'LIVE RADAR' : 'LIVE GPS'}
                     </span>
                   </div>
 
