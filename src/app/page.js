@@ -805,7 +805,12 @@ export default function Home() {
           shipments={shipmentsList}
           onSelectShipmentOnMap={(shipment) => {
             if (isNodalOfficer || profile?.role === 'nodal_officer') {
-              focusOnMap([parseFloat(shipment.current_lat), parseFloat(shipment.current_lng)], 14, shipment);
+              const lat = parseFloat(shipment.current_lat || shipment.origin_lat || shipment.current_latitude || 26.14);
+              const lng = parseFloat(shipment.current_lng || shipment.origin_lng || shipment.current_longitude || 91.73);
+              if (!isNaN(lat) && !isNaN(lng)) {
+                setCurrentView('command');
+                focusOnMap([lat, lng], 14, shipment);
+              }
             }
           }} 
         />

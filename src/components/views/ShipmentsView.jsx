@@ -71,7 +71,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
 
       // Privacy: Field operators only fetch their own shipments from DB
       if (!effectiveIsNodal && user?.id) {
-        query = query.or(`driver_id.eq.${user.id},user_id.eq.${user.id},created_by.eq.${user.id}`);
+        query = query.eq('driver_id', user.id);
       }
 
       const { data, error } = await query;
@@ -83,8 +83,8 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         const offlineShipments = await db.offline_shipment_queue.where('synced').equals(0).toArray();
         if (Array.isArray(offlineShipments) && offlineShipments.length > 0) {
           offlineShipments.forEach(offS => {
-            const isMine = effectiveIsNodal || (user?.id && (offS.driver_id === user.id || offS.user_id === user.id));
-            if (isMine && !combined.some(s => s.tracking_code === offS.tracking_code || (offS.id && s.id === offS.id))) {
+            const isMine = effectiveIsNodal || (user?.id && offS.driver_id === user.id);
+            if (isMine && !combined.some(s => (offS.tracking_code && s.tracking_code === offS.tracking_code) || (offS.id && s.id === offS.id))) {
               combined.unshift(offS);
             }
           });
@@ -98,10 +98,11 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
           if (cached) {
             const parsed = JSON.parse(cached);
             if (parsed && parsed.tracking_code) {
+              const isMine = effectiveIsNodal || (user?.id && parsed.driver_id === user.id);
               const alreadyExists = combined.some(s => 
                 s.tracking_code === parsed.tracking_code || (parsed.id && s.id === parsed.id)
               );
-              if (!alreadyExists) {
+              if (isMine && !alreadyExists) {
                 combined.unshift(parsed);
               }
             }
@@ -109,11 +110,17 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         } catch (e) {}
       }
 
-      if (!error && combined.length > 0) {
+      // Filter out permanently deleted shipments
+      if (typeof window !== 'undefined') {
+        try {
+          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
+          combined = combined.filter(s => !delCache.includes(s.id) && !delCache.includes(s.tracking_code));
+        } catch (e) {}
+      }
+
+      if (combined.length > 0) {
         setLiveShipments(combined);
-      } else if (combined.length > 0) {
-        setLiveShipments(combined);
-      } else if (shipments && shipments.length > 0) {
+      } else if (shipments && Array.isArray(shipments) && shipments.length > 0) {
         setLiveShipments(shipments);
       } else {
         setLiveShipments([]);
@@ -289,68 +296,97 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
     }
   };
 
-    // Privacy Scoping: Nodal Officers view all convoys across NER, Field Operators view only their own
-    const displayShipments = useMemo(() => {
-      if (effectiveIsNodal) return liveShipments;
-      return liveShipments.filter((s) => {
-        const isMyDriverId = user?.id && s.driver_id === user.id;
-        const isMyUserId = user?.id && (s.user_id === user.id || s.created_by === user.id);
-        const isMyDriverCode = profile?.driver_code && s.driver_code === profile.driver_code;
-        const isMyDriverName = profile?.full_name && s.driver_name === profile.full_name;
-
-        let isMyLocalJourney = false;
-        if (typeof window !== 'undefined') {
-          try {
-            const cached = localStorage.getItem('ner_active_journey') || localStorage.getItem('ner_active_transit_journey');
-            if (cached) {
-              const parsed = JSON.parse(cached);
-              if (parsed && (parsed.tracking_code === s.tracking_code || (parsed.id && parsed.id === s.id))) {
-                isMyLocalJourney = true;
-              }
-            }
-          } catch (e) {}
-        }
-
-        return isMyDriverId || isMyUserId || isMyDriverCode || isMyDriverName || isMyLocalJourney;
+  // Safe Date Formatter helper (guaranteed zero RangeError)
+  const formatDispatchDate = (created_at) => {
+    if (!created_at) return 'Active Journey';
+    try {
+      const d = new Date(created_at);
+      if (isNaN(d.getTime())) return 'Active Journey';
+      return d.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
       });
-    }, [liveShipments, effectiveIsNodal, user?.id, profile?.driver_code, profile?.full_name]);
+    } catch {
+      return 'Active Journey';
+    }
+  };
+
+  // Safe Coordinate Formatter helper
+  const formatCoord = (val, fallback = 26.14) => {
+    const num = parseFloat(val);
+    return isNaN(num) ? Number(fallback).toFixed(4) : num.toFixed(4);
+  };
+
+  // Privacy Scoping: Nodal Officers view all convoys across NER, Field Operators view only their own
+  const displayShipments = useMemo(() => {
+    const list = Array.isArray(liveShipments) ? liveShipments : [];
+    if (effectiveIsNodal) return list;
+    return list.filter((s) => {
+      if (!s) return false;
+      const isMyDriverId = Boolean(user?.id && s.driver_id === user.id);
+      const isMyDriverCode = Boolean(profile?.driver_code && s.driver_code === profile.driver_code);
+      const isMyDriverName = Boolean(profile?.full_name && s.driver_name === profile.full_name);
+
+      let isMyLocalJourney = false;
+      if (typeof window !== 'undefined') {
+        try {
+          const cached = localStorage.getItem('ner_active_journey') || localStorage.getItem('ner_active_transit_journey');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && (parsed.tracking_code === s.tracking_code || (parsed.id && parsed.id === s.id))) {
+              isMyLocalJourney = true;
+            }
+          }
+        } catch (e) {}
+      }
+
+      return isMyDriverId || isMyDriverCode || isMyDriverName || isMyLocalJourney;
+    });
+  }, [liveShipments, effectiveIsNodal, user?.id, profile?.driver_code, profile?.full_name]);
 
   const inTransitCount = displayShipments.filter((s) => {
+    if (!s) return false;
     const st = (s.status || '').toLowerCase();
     return st === 'in_transit' || st === 'in-transit' || st === 'active';
   }).length;
 
   const deliveredCount = displayShipments.filter((s) => {
+    if (!s) return false;
     const st = (s.status || '').toLowerCase();
     return st === 'delivered' || st === 'completed';
   }).length;
 
   const pendingCount = displayShipments.length - inTransitCount - deliveredCount;
 
-  const filteredShipments = displayShipments.filter((s) => {
-    const q = search.toLowerCase();
-    const originText = s.origin_hub_name || s.origin || '';
-    const destText = s.dest_hub_name || s.destination_district || s.destination_state || '';
-    const cargoText = s.cargo_type || s.commodity_type || '';
-    const codeText = s.tracking_code || s.consignment_number || '';
-    const driverText = s.driver_name || s.driver_code || '';
+  const filteredShipments = useMemo(() => {
+    return displayShipments.filter((s) => {
+      if (!s) return false;
+      const q = (search || '').toLowerCase().trim();
+      const originText = String(s.origin_hub_name || s.origin || '');
+      const destText = String(s.dest_hub_name || s.destination_district || s.destination_state || '');
+      const cargoText = String(s.cargo_type || s.commodity_type || '');
+      const codeText = String(s.tracking_code || s.consignment_number || '');
+      const driverText = String(s.driver_name || s.driver_code || '');
 
-    const matchesSearch = 
-      !q ||
-      originText.toLowerCase().includes(q) ||
-      destText.toLowerCase().includes(q) ||
-      cargoText.toLowerCase().includes(q) ||
-      codeText.toLowerCase().includes(q) ||
-      driverText.toLowerCase().includes(q);
+      const matchesSearch = 
+        !q ||
+        originText.toLowerCase().includes(q) ||
+        destText.toLowerCase().includes(q) ||
+        cargoText.toLowerCase().includes(q) ||
+        codeText.toLowerCase().includes(q) ||
+        driverText.toLowerCase().includes(q);
 
-    const st = (s.status || '').toLowerCase();
-    const matchesStatus = 
-      statusFilter === 'ALL' ||
-      (statusFilter === 'in_transit' && (st === 'in_transit' || st === 'in-transit' || st === 'active')) ||
-      (statusFilter === 'delivered' && (st === 'delivered' || st === 'completed'));
+      const st = (s.status || '').toLowerCase();
+      const matchesStatus = 
+        statusFilter === 'ALL' ||
+        (statusFilter === 'in_transit' && (st === 'in_transit' || st === 'in-transit' || st === 'active')) ||
+        (statusFilter === 'delivered' && (st === 'delivered' || st === 'completed'));
 
-    return matchesSearch && matchesStatus;
-  });
+      return matchesSearch && matchesStatus;
+    });
+  }, [displayShipments, search, statusFilter]);
 
   return (
     <div className="flex-1 p-3 sm:p-5 lg:p-6 space-y-4 sm:space-y-5 max-w-7xl mx-auto w-full font-sans">
@@ -699,7 +735,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                     </div>
 
                     <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 font-mono">
-                      <span>GPS: {parseFloat(s.current_lat || s.origin_lat || 26.14).toFixed(4)}, {parseFloat(s.current_lng || s.origin_lng || 91.73).toFixed(4)}</span>
+                      <span>GPS: {formatCoord(s.current_lat || s.origin_lat, 26.14)}, {formatCoord(s.current_lng || s.origin_lng, 91.73)}</span>
                       <span className="text-blue-600 dark:text-cyan-400 font-bold">{s.estimated_eta || 'On Schedule'}</span>
                     </div>
 
@@ -815,13 +851,13 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
 
                         {/* 5. Coordinates & Speed */}
                         <td className="py-4 px-3 font-mono text-[11px] text-slate-600 dark:text-slate-400">
-                          <div>{parseFloat(s.current_lat || s.origin_lat || 26.14).toFixed(4)},</div>
-                          <div>{parseFloat(s.current_lng || s.origin_lng || 91.73).toFixed(4)}</div>
+                          <div>{formatCoord(s.current_lat || s.origin_lat, 26.14)},</div>
+                          <div>{formatCoord(s.current_lng || s.origin_lng, 91.73)}</div>
                         </td>
 
                         {/* 6. Dispatched At */}
                         <td className="py-4 px-3 text-slate-500 dark:text-slate-400 font-mono text-[11px]">
-                          {s.created_at ? new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Active Journey'}
+                          {formatDispatchDate(s.created_at)}
                         </td>
 
                         {/* 7. Action Buttons */}
