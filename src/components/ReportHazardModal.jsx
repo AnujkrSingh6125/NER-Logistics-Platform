@@ -35,6 +35,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
 import { reverseGeocode } from '@/lib/geoUtils';
 import { validateNerLocation } from '@/lib/nerGeofence';
+import { queueOfflineReport, db } from '@/lib/offlineDb';
 
 export default function ReportHazardModal({ 
   isOpen = true, 
@@ -641,91 +642,16 @@ export default function ReportHazardModal({
 
     setSubmitting(true);
     setErrorMsg(null);
-    setUploadProgress('🤖 Running Gemini AI disaster forensic inspection on evidence...');
+    setUploadProgress('Preparing disaster evidence...');
 
     try {
-      // 3. Convert media to Base64 for instant AI Pre-Screening BEFORE Storage Upload
+      const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      let isOfflineSubmission = !isOnline;
+
+      // 3. Convert media to Base64 for evidence preservation (for both AI inspection and offline queue storage)
       const base64List = await Promise.all(
         mediaItems.map((item) => fileToBase64(item.file))
       );
-
-      // 4. Gemini Multimodal Disaster Authenticity Forensic Pre-Screen
-      let verifyData = null;
-      try {
-        const verifyRes = await fetch('/api/ai/verify-hazard', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            mediaBase64List: base64List,
-            declaredHazardType: mapHazardType(hazardType),
-            declaredSeverity: mapSeverity(severity),
-            description: description.trim(),
-            state: state || 'Assam',
-            district: district || '',
-          }),
-        });
-
-        verifyData = await verifyRes.json();
-        if (!verifyRes.ok || !verifyData?.success) {
-          setErrorMsg(`⚠️ AI Forensic Service Error: ${verifyData?.error || 'Failed to complete image authenticity verification.'}`);
-          setSubmitting(false);
-          setUploadProgress('');
-          return; // HARD STOP!
-        }
-      } catch (fetchErr) {
-        setErrorMsg(`⚠️ AI Forensic Connection Failure: ${fetchErr.message || 'Unable to connect to verification server.'}`);
-        setSubmitting(false);
-        setUploadProgress('');
-        return; // HARD STOP!
-      }
-
-      // 5. HARD REJECTION GATE: If AI detects non-disaster, screenshot, fake media, or invalid/gibberish description
-      if (!verifyData?.verified || !verifyData?.analysis?.is_real_hazard || !verifyData?.analysis?.is_description_valid) {
-        const rejectReason = verifyData?.analysis?.rejection_reason || 
-          verifyData?.analysis?.verdict_summary || 
-          'The hazard report could not be verified due to invalid media evidence or meaningless description context.';
-        
-        setErrorMsg(`🚫 AI Verification Rejected: ${rejectReason}`);
-        setSubmitting(false);
-        setUploadProgress('');
-        return; // HARD STOP! Do NOT upload to storage and do NOT insert into database!
-      }
-
-      // 6. Media passed AI validation: Proceed to upload evidence to Supabase Storage
-      setUploadProgress(`Uploading ${mediaItems.length} verified media file(s)...`);
-      const uploadedUrls = [];
-
-      for (let i = 0; i < mediaItems.length; i++) {
-        const item = mediaItems[i];
-        setUploadProgress(`Uploading media ${i + 1} of ${mediaItems.length}...`);
-        
-        try {
-          const ext = item.file.name.split('.').pop() || (item.type === 'video' ? 'mp4' : 'jpg');
-          const cleanExt = ext.toLowerCase().replace(/[^a-z0-9]/g, '');
-          const fileName = `${Date.now()}-${i}-${Math.random().toString(36).substring(2, 8)}.${cleanExt}`;
-          const filePath = `reports/${fileName}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from('hazard-images')
-            .upload(filePath, item.file, { upsert: true });
-
-          if (!uploadError) {
-            const { data: urlData } = supabase.storage
-              .from('hazard-images')
-              .getPublicUrl(filePath);
-
-            if (urlData?.publicUrl) {
-              uploadedUrls.push(urlData.publicUrl);
-            }
-          } else {
-            console.warn(`Upload error on file ${item.name}:`, uploadError.message);
-          }
-        } catch (fileErr) {
-          console.warn('Media upload exception:', fileErr);
-        }
-      }
-
-      setUploadProgress('Saving verified disaster incident record...');
 
       const reporterRole = isNodalOfficer ? 'nodal_officer' : 'citizen_driver';
       const reporterName = isNodalOfficer
@@ -737,11 +663,11 @@ export default function ReportHazardModal({
 
       const dbHazardType = mapHazardType(hazardType);
       const dbSeverity = mapSeverity(severity);
-      const titleText = description.trim().slice(0, 60);
+      const titleText = description.trim().slice(0, 60) || `${hazardType.replace(/_/g, ' ')} Incident`;
 
-      // Ensure accurate real-world state and district via direct reverse geocoding lookup
+      // Resolve state/district
       let finalPlace = detectedLocation;
-      if (!finalPlace) {
+      if (!finalPlace && isOnline) {
         try {
           finalPlace = await reverseGeocode(finalLat, finalLng);
         } catch (e) {}
@@ -749,131 +675,212 @@ export default function ReportHazardModal({
 
       const realState = finalPlace?.state || (state && state !== 'Assam' ? state : null) || effectiveProfile?.state || nodalOfficer?.state || 'Assam';
       const realDistrict = finalPlace?.district || finalPlace?.locality || (district && district !== 'Unspecified Sector' ? district : null) || 'Central Sector';
-
-      // 7. Insert payload into Supabase with full AI forensic audit data
       const userId = isNodalOfficer ? null : (user?.id || null);
-      const primaryMediaUrl = (uploadedUrls && uploadedUrls.length > 0) ? uploadedUrls[0] : null;
 
-      const basePayload = {
-        title: titleText,
-        hazard_type: dbHazardType,
-        severity: dbSeverity,
-        impact_radius_km: parseFloat(impactRadiusKm) || 5.0,
-        status: isNodalOfficer ? 'verified' : 'reported',
-        latitude: finalLat,
-        longitude: finalLng,
-        state: realState,
-        district: realDistrict,
-        notes: description.trim(),
-        image_url: primaryMediaUrl,
-        media_urls: uploadedUrls,
-        reported_by: userId,
-        reported_by_id: userId,
-        reported_by_role: reporterRole,
-        reported_by_name: reporterName,
-        reported_by_contact: reporterContact,
-        is_verified: true,
-        ai_verified: true,
-        ai_confidence: verifyData?.analysis?.authenticity_confidence || 0.9,
-        ai_hazard_type: verifyData?.analysis?.detected_hazard_type || dbHazardType,
-        ai_verdict_summary: verifyData?.analysis?.verdict_summary || null,
-        ai_analysis_raw: verifyData?.analysis || null,
-      };
+      let verifyData = null;
 
-      // Try inserting with full payload
-      let activePayload = { ...basePayload };
-      let { data, error: dbError } = await supabase
-        .from('road_hazards')
-        .insert([activePayload])
-        .select()
-        .single();
+      // 4. If online, run Gemini Multimodal Forensic Pre-Screen
+      if (isOnline) {
+        setUploadProgress('🤖 Running Gemini AI disaster forensic inspection on evidence...');
+        try {
+          const verifyRes = await fetch('/api/ai/verify-hazard', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              mediaBase64List: base64List,
+              declaredHazardType: dbHazardType,
+              declaredSeverity: dbSeverity,
+              description: description.trim(),
+              state: realState,
+              district: realDistrict,
+            }),
+          });
 
-      // Graceful fallback if database schema cache lacks optional columns, violates constraints, or has foreign key issues
-      if (dbError) {
-        console.warn('Initial hazard insertion returned error, executing resilient recovery:', dbError.message);
-
-        // 1. Strip optional / unmigrated columns
-        const strippedPayload = { ...activePayload };
-        delete strippedPayload.reported_by_id;
-        delete strippedPayload.media_urls;
-        delete strippedPayload.ai_verified;
-        delete strippedPayload.ai_confidence;
-        delete strippedPayload.ai_hazard_type;
-        delete strippedPayload.ai_verdict_summary;
-        delete strippedPayload.ai_analysis_raw;
-        if (dbError.message?.includes('impact_radius_km') || dbError.code === 'PGRST204') {
-          delete strippedPayload.impact_radius_km;
-        }
-
-        // 2. Clear foreign key if auth user is unverified or mismatch
-        if (dbError.code === '23503' || dbError.message?.includes('reported_by_fkey') || dbError.message?.includes('reported_by_id_fkey')) {
-          strippedPayload.reported_by = null;
-        }
-
-        // Try second attempt with stripped payload
-        const retryResult = await supabase
-          .from('road_hazards')
-          .insert([strippedPayload])
-          .select()
-          .single();
-
-        data = retryResult.data;
-        dbError = retryResult.error;
-
-        // 3. If check constraint violation on hazard_type (Postgres error 23514 / road_hazards_hazard_type_check)
-        if (dbError && (
-          dbError.code === '23514' || 
-          dbError.message?.toLowerCase().includes('hazard_type_check') || 
-          dbError.message?.toLowerCase().includes('check constraint')
-        )) {
-          console.warn('Check constraint detected on hazard_type, executing alias retry chain...');
-
-          const fallbackCandidates = [];
-          if (dbHazardType === 'road_washout' || dbHazardType === 'bridge_damage') {
-            fallbackCandidates.push('road_damage', 'landslide', 'other', 'flood');
-          } else if (dbHazardType === 'flash_flood' || dbHazardType === 'heavy_waterlogging') {
-            fallbackCandidates.push('flood', 'other', 'landslide', 'road_damage');
-          } else if (dbHazardType === 'tree_fall') {
-            fallbackCandidates.push('road_damage', 'weather', 'other', 'landslide');
+          if (verifyRes.ok) {
+            verifyData = await verifyRes.json();
           } else {
-            fallbackCandidates.push('landslide', 'other', 'road_damage', 'flood');
+            console.warn('AI verification returned non-200, storing in offline queue for deferred sync.');
+            isOfflineSubmission = true;
           }
+        } catch (fetchErr) {
+          console.warn('AI verification connection failure, gracefully queueing report offline:', fetchErr);
+          isOfflineSubmission = true;
+        }
+      }
 
-          for (const fallbackType of fallbackCandidates) {
-            const fbPayload = {
-              ...strippedPayload,
-              hazard_type: fallbackType,
-              notes: strippedPayload.notes 
-                ? `[Hazard: ${dbHazardType.replace(/_/g, ' ')}] ${strippedPayload.notes}` 
-                : strippedPayload.notes
-            };
+      // 5. If online and AI analysis completed:
+      if (!isOfflineSubmission && verifyData?.success) {
+        // HARD REJECTION GATE for explicit online fake/spam submissions:
+        if (!verifyData?.verified || !verifyData?.analysis?.is_real_hazard || !verifyData?.analysis?.is_description_valid) {
+          const rejectReason = verifyData?.analysis?.rejection_reason || 
+            verifyData?.analysis?.verdict_summary || 
+            'The hazard report could not be verified due to invalid media evidence or meaningless description context.';
+          
+          setErrorMsg(`🚫 AI Verification Rejected: ${rejectReason}`);
+          setSubmitting(false);
+          setUploadProgress('');
+          return; // HARD STOP!
+        }
 
-            const constraintRetry = await supabase
+        // Media passed AI validation: Proceed to upload evidence to Supabase Storage
+        setUploadProgress(`Uploading ${mediaItems.length} verified media file(s)...`);
+        const uploadedUrls = [];
+
+        for (let i = 0; i < mediaItems.length; i++) {
+          const item = mediaItems[i];
+          setUploadProgress(`Uploading media ${i + 1} of ${mediaItems.length}...`);
+          
+          try {
+            const ext = item.file.name.split('.').pop() || (item.type === 'video' ? 'mp4' : 'jpg');
+            const cleanExt = ext.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const fileName = `${Date.now()}-${i}-${Math.random().toString(36).substring(2, 8)}.${cleanExt}`;
+            const filePath = `reports/${fileName}`;
+
+            const { error: uploadError } = await supabase.storage
+              .from('hazard-images')
+              .upload(filePath, item.file, { upsert: true });
+
+            if (!uploadError) {
+              const { data: urlData } = supabase.storage
+                .from('hazard-images')
+                .getPublicUrl(filePath);
+
+              if (urlData?.publicUrl) {
+                uploadedUrls.push(urlData.publicUrl);
+              }
+            } else {
+              console.warn(`Upload error on file ${item.name}:`, uploadError.message);
+            }
+          } catch (fileErr) {
+            console.warn('Media upload exception:', fileErr);
+          }
+        }
+
+        setUploadProgress('Saving verified disaster incident record...');
+        const primaryMediaUrl = (uploadedUrls && uploadedUrls.length > 0) ? uploadedUrls[0] : null;
+
+        const basePayload = {
+          title: titleText,
+          hazard_type: dbHazardType,
+          severity: dbSeverity,
+          impact_radius_km: parseFloat(impactRadiusKm) || 5.0,
+          status: isNodalOfficer ? 'verified' : 'reported',
+          latitude: finalLat,
+          longitude: finalLng,
+          state: realState,
+          district: realDistrict,
+          notes: description.trim(),
+          image_url: primaryMediaUrl,
+          media_urls: uploadedUrls,
+          reported_by: userId,
+          reported_by_id: userId,
+          reported_by_role: reporterRole,
+          reported_by_name: reporterName,
+          reported_by_contact: reporterContact,
+          is_verified: true,
+          ai_verified: true,
+          ai_confidence: verifyData?.analysis?.authenticity_confidence || 0.9,
+          ai_hazard_type: verifyData?.analysis?.detected_hazard_type || dbHazardType,
+          ai_verdict_summary: verifyData?.analysis?.verdict_summary || null,
+          ai_analysis_raw: verifyData?.analysis || null,
+        };
+
+        try {
+          let { data, error: dbError } = await supabase
+            .from('road_hazards')
+            .insert([basePayload])
+            .select()
+            .single();
+
+          if (dbError) {
+            console.warn('Supabase DB error, attempting stripped payload or offline queue:', dbError);
+            const strippedPayload = { ...basePayload };
+            delete strippedPayload.reported_by_id;
+            delete strippedPayload.media_urls;
+            delete strippedPayload.ai_verified;
+            delete strippedPayload.ai_confidence;
+            delete strippedPayload.ai_hazard_type;
+            delete strippedPayload.ai_verdict_summary;
+            delete strippedPayload.ai_analysis_raw;
+
+            const retryResult = await supabase
               .from('road_hazards')
-              .insert([fbPayload])
+              .insert([strippedPayload])
               .select()
               .single();
 
-            if (!constraintRetry.error) {
-              data = constraintRetry.data;
+            if (!retryResult.error) {
+              data = retryResult.data;
               dbError = null;
-              break;
             } else {
-              dbError = constraintRetry.error;
+              isOfflineSubmission = true;
             }
           }
+
+          if (data && !dbError) {
+            if (onSuccess) onSuccess(data);
+            if (onHazardReported) onHazardReported(data);
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('ner_hazard_reported', { detail: data }));
+            }
+            if (onClose) onClose();
+            return;
+          }
+        } catch (dbEx) {
+          console.warn('Network error inserting to DB, falling back to offline queue:', dbEx);
+          isOfflineSubmission = true;
         }
       }
 
-      if (dbError) throw dbError;
+      // 6. OFFLINE STORE-AND-FORWARD QUEUEING:
+      if (isOfflineSubmission) {
+        setUploadProgress('💾 Storing report safely in offline queue...');
+        const tempId = `off-hz-${Date.now()}`;
+        const offlineRecord = {
+          id: tempId,
+          temp_id: tempId,
+          title: titleText,
+          hazard_type: dbHazardType,
+          severity: dbSeverity,
+          impact_radius_km: parseFloat(impactRadiusKm) || 5.0,
+          status: 'reported',
+          latitude: finalLat,
+          longitude: finalLng,
+          state: realState,
+          district: realDistrict,
+          notes: description.trim(),
+          mediaBase64List: base64List,
+          mediaItemsMeta: mediaItems.map(m => ({ name: m.name, type: m.type, size: m.size })),
+          reported_by: userId,
+          reported_by_id: userId,
+          reported_by_role: reporterRole,
+          reported_by_name: reporterName,
+          reported_by_contact: reporterContact,
+          is_offline_pending: true,
+          ai_verified: false,
+          synced: 0,
+          sync_status: 'pending_ai_verification',
+          created_at: new Date().toISOString()
+        };
 
-      if (onSuccess) onSuccess(data);
-      if (onHazardReported) onHazardReported(data);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('ner_hazard_reported', { detail: data }));
+        // Queue in IndexedDB
+        await queueOfflineReport(offlineRecord);
+        try {
+          await db.road_hazards.put({
+            ...offlineRecord,
+            is_offline_cached: true,
+          });
+        } catch (dexErr) {}
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ner_hazard_reported', { detail: offlineRecord }));
+          window.dispatchEvent(new CustomEvent('ner_offline_hazard_queued', { detail: offlineRecord }));
+        }
+
+        if (onSuccess) onSuccess(offlineRecord);
+        if (onHazardReported) onHazardReported(offlineRecord);
+        if (onClose) onClose();
       }
-
-      if (onClose) onClose();
     } catch (err) {
       console.error('Hazard submission failure:', err);
       setErrorMsg(err.message || 'Failed to submit report. Please check database connection.');

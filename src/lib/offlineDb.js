@@ -1,4 +1,5 @@
 import Dexie from 'dexie';
+import { supabase } from '@/lib/supabaseClient';
 
 // Initialize Tactical Offline Dexie Database
 export const db = new Dexie('NERLogisticsDB');
@@ -270,6 +271,199 @@ export async function syncPendingReportsWhenOnline(insertHazardFn) {
 }
 
 /**
+ * Auto-sync pending offline hazard reports with Gemini AI Verification
+ * Runs text & image forensics on each queued report when internet connection is regained.
+ * If AI passes: Uploads media to Supabase storage and imports into public.road_hazards.
+ * If AI fails: Rejects report in offline queue and emits rejection bulletin notice.
+ * @param {Function} onResult - Callback with { status: 'verified_and_synced' | 'rejected', item }
+ * @returns {Promise<{ syncedCount: number, rejectedCount: number, results: Array }>}
+ */
+export async function syncOfflineHazardsWithAiVerification(onResult = null) {
+  const pending = await getOfflinePendingReports();
+  if (!pending.length) return { syncedCount: 0, rejectedCount: 0, results: [] };
+
+  let syncedCount = 0;
+  let rejectedCount = 0;
+  const results = [];
+
+  for (const item of pending) {
+    try {
+      // 1. Run Gemini AI Verification on the queued report
+      let verifyData = null;
+      try {
+        const verifyRes = await fetch('/api/ai/verify-hazard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mediaBase64List: item.mediaBase64List || [],
+            declaredHazardType: item.hazard_type,
+            declaredSeverity: item.severity,
+            description: item.notes || item.description || '',
+            state: item.state || 'Assam',
+            district: item.district || '',
+          }),
+        });
+
+        if (verifyRes.ok) {
+          verifyData = await verifyRes.json();
+        }
+      } catch (aiErr) {
+        console.warn('Network error during offline sync AI check:', aiErr);
+        continue; // Keep in queue for next sync cycle
+      }
+
+      if (!verifyData || !verifyData.success) {
+        // AI service unreachable or temporary error; keep in queue to retry later
+        continue;
+      }
+
+      // 2. Check AI verification result
+      const isPassed = verifyData.verified && 
+                       verifyData.analysis?.is_real_hazard && 
+                       verifyData.analysis?.is_description_valid;
+
+      if (!isPassed) {
+        // AI REJECTED: Mark as rejected in queue
+        const rejectionReason = verifyData.analysis?.rejection_reason || 
+          verifyData.analysis?.verdict_summary || 
+          'Media evidence or description context did not pass authenticity verification.';
+
+        await db.offline_hazard_queue.update(item.id, {
+          synced: 2, // 2 = Rejected by AI
+          sync_status: 'rejected',
+          rejection_reason: rejectionReason,
+          synced_at: new Date().toISOString()
+        });
+
+        // Also remove temporary hazard marker from offline road_hazards
+        if (item.temp_id) {
+          await db.road_hazards.delete(item.temp_id).catch(() => {});
+        }
+
+        rejectedCount++;
+        const rejectResult = {
+          id: item.id,
+          title: item.title || item.notes?.slice(0, 40) || 'Hazard Report',
+          location: `${item.district ? item.district + ', ' : ''}${item.state}`,
+          status: 'rejected',
+          reason: rejectionReason,
+          created_at: item.created_at
+        };
+        results.push(rejectResult);
+
+        // Emit bulletin rejection event
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ner_offline_hazard_rejected', { detail: rejectResult }));
+        }
+
+        if (onResult) onResult(rejectResult);
+      } else {
+        // AI PASSED: Upload images to Supabase storage & Insert to Supabase road_hazards
+        const uploadedUrls = [];
+        if (item.mediaBase64List && item.mediaBase64List.length > 0) {
+          for (let i = 0; i < item.mediaBase64List.length; i++) {
+            const m = item.mediaBase64List[i];
+            try {
+              const mime = m.mimeType || 'image/jpeg';
+              const ext = mime.split('/')[1] || 'jpg';
+              const cleanExt = ext.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const fileName = `offline-sync-${Date.now()}-${i}.${cleanExt}`;
+              const filePath = `reports/${fileName}`;
+
+              // Convert base64 back to Blob
+              const byteCharacters = atob(m.data.replace(/^data:[^;]+;base64,/, ''));
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let j = 0; j < byteCharacters.length; j++) {
+                byteNumbers[j] = byteCharacters.charCodeAt(j);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray], { type: mime });
+
+              const { error: upErr } = await supabase.storage
+                .from('hazard-images')
+                .upload(filePath, blob, { upsert: true });
+
+              if (!upErr) {
+                const { data: urlData } = supabase.storage.from('hazard-images').getPublicUrl(filePath);
+                if (urlData?.publicUrl) uploadedUrls.push(urlData.publicUrl);
+              }
+            } catch (upEx) {
+              console.warn('Failed to upload offline media during sync:', upEx);
+            }
+          }
+        }
+
+        const primaryUrl = uploadedUrls.length > 0 ? uploadedUrls[0] : null;
+
+        const serverPayload = {
+          title: item.title || (item.notes ? item.notes.slice(0, 60) : 'Hazard Incident'),
+          hazard_type: item.hazard_type,
+          severity: item.severity,
+          impact_radius_km: item.impact_radius_km || 5.0,
+          status: 'reported',
+          latitude: item.latitude,
+          longitude: item.longitude,
+          state: item.state,
+          district: item.district,
+          notes: item.notes,
+          image_url: primaryUrl,
+          media_urls: uploadedUrls,
+          reported_by: item.reported_by || null,
+          reported_by_id: item.reported_by_id || null,
+          reported_by_role: item.reported_by_role || 'citizen_driver',
+          reported_by_name: item.reported_by_name || 'Field Reporter',
+          reported_by_contact: item.reported_by_contact || '',
+          is_verified: true,
+          ai_verified: true,
+          ai_confidence: verifyData.analysis?.authenticity_confidence || 0.9,
+          ai_hazard_type: verifyData.analysis?.detected_hazard_type || item.hazard_type,
+          ai_verdict_summary: verifyData.analysis?.verdict_summary || null,
+          ai_analysis_raw: verifyData.analysis || null,
+        };
+
+        const { data: insertedData, error: insErr } = await supabase
+          .from('road_hazards')
+          .insert([serverPayload])
+          .select()
+          .maybeSingle();
+
+        if (!insErr && insertedData) {
+          await db.offline_hazard_queue.update(item.id, {
+            synced: 1,
+            sync_status: 'verified_and_synced',
+            server_id: insertedData.id,
+            synced_at: new Date().toISOString()
+          });
+
+          // Save to local cached road_hazards
+          await db.road_hazards.put(insertedData);
+          syncedCount++;
+
+          const passResult = {
+            id: item.id,
+            title: item.title,
+            location: `${item.district ? item.district + ', ' : ''}${item.state}`,
+            status: 'verified_and_synced',
+            hazard: insertedData,
+          };
+          results.push(passResult);
+
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('ner_hazard_reported', { detail: insertedData }));
+          }
+
+          if (onResult) onResult(passResult);
+        }
+      }
+    } catch (err) {
+      console.error(`Error processing offline hazard ${item.id}:`, err);
+    }
+  }
+
+  return { syncedCount, rejectedCount, results };
+}
+
+/**
  * Auto-sync all pending offline convoy dispatches to Supabase when network resumes
  * @param {Function} insertShipmentFn - Async function to insert shipment into Supabase
  * @returns {Promise<{ syncedCount: number, errors: Array }>}
@@ -330,5 +524,46 @@ export async function deleteShipmentOffline(shipmentId, trackingCode) {
     }
   } catch (err) {
     console.warn('Dexie: Failed to delete shipment offline:', err);
+  }
+}
+
+/**
+ * Retrieve all offline hazard reports rejected by Gemini AI forensics
+ * @returns {Promise<Array>}
+ */
+export async function getOfflineRejectedReports() {
+  try {
+    if (!db.offline_hazard_queue) return [];
+    return await db.offline_hazard_queue.where('synced').equals(2).toArray();
+  } catch (err) {
+    console.warn('Dexie: Failed to get rejected offline reports:', err);
+    return [];
+  }
+}
+
+/**
+ * Dismiss/delete a rejected offline hazard report record from queue
+ * @param {number} id
+ */
+export async function dismissOfflineRejectedReport(id) {
+  try {
+    if (db.offline_hazard_queue && id) {
+      await db.offline_hazard_queue.delete(id);
+    }
+  } catch (err) {
+    console.warn(`Dexie: Failed to dismiss rejected report ${id}:`, err);
+  }
+}
+
+/**
+ * Clear all rejected offline hazard reports
+ */
+export async function clearAllRejectedReports() {
+  try {
+    if (db.offline_hazard_queue) {
+      await db.offline_hazard_queue.where('synced').equals(2).delete();
+    }
+  } catch (err) {
+    console.warn('Dexie: Failed to clear all rejected reports:', err);
   }
 }

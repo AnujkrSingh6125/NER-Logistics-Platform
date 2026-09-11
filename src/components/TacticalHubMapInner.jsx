@@ -663,7 +663,7 @@ export default function TacticalHubMapInner({
         window.removeEventListener('ner_journey_deleted', handleJourneyHalted);
       };
     }
-  }, [isNodalOfficer, user?.id]);
+  }, [effectiveIsNodal, user?.id]);
 
   // Filter matching drivers for tactical search bar
   const matchingDrivers = useMemo(() => {

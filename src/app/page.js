@@ -44,10 +44,21 @@ import {
   LocateFixed,
   Trash2,
   Maximize2,
+  ShieldAlert,
+  X,
   Map as MapIcon
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
-import { db, getHubsOffline, saveHubsOffline, syncPendingReportsWhenOnline, syncPendingShipmentsWhenOnline } from '@/lib/offlineDb';
+import { 
+  db, 
+  getHubsOffline, 
+  saveHubsOffline, 
+  syncPendingReportsWhenOnline, 
+  syncPendingShipmentsWhenOnline,
+  syncOfflineHazardsWithAiVerification,
+  getOfflineRejectedReports,
+  dismissOfflineRejectedReport
+} from '@/lib/offlineDb';
 import { calculateSafestMultiRoutes, findHazardsAlongRoute, rescoreRoutesWithHazards } from '@/lib/routingService';
 
 // Master Fallback 50 NER Supply Hubs across all 8 states
@@ -151,7 +162,53 @@ export default function Home() {
   const [terminatingJourney, setTerminatingJourney] = useState(false);
   const [markingDelivered, setMarkingDelivered] = useState(false);
   const [journeyNotice, setJourneyNotice] = useState(null);
+  const [bulletinNotices, setBulletinNotices] = useState([]);
   const [isManifestModalOpen, setIsManifestModalOpen] = useState(false);
+
+  // Load any rejected offline hazard reports on mount & listen for new AI rejections
+  useEffect(() => {
+    async function loadRejectedBulletins() {
+      try {
+        const rejected = await getOfflineRejectedReports();
+        if (rejected && rejected.length > 0) {
+          const formatted = rejected.map(r => ({
+            id: r.id,
+            title: r.title || r.notes?.slice(0, 40) || 'Hazard Report',
+            location: `${r.district ? r.district + ', ' : ''}${r.state || 'NER Corridor'}`,
+            status: 'rejected',
+            reason: r.rejection_reason || 'Media evidence or description context did not pass authenticity verification.',
+            created_at: r.created_at
+          }));
+          setBulletinNotices(formatted);
+        }
+      } catch (err) {
+        console.warn('Failed to load offline rejected reports:', err);
+      }
+    }
+
+    loadRejectedBulletins();
+
+    const handleHazardRejected = (e) => {
+      if (e.detail) {
+        setBulletinNotices(prev => {
+          if (prev.some(item => item.id === e.detail.id)) return prev;
+          return [e.detail, ...prev];
+        });
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('ner_offline_hazard_rejected', handleHazardRejected);
+      return () => {
+        window.removeEventListener('ner_offline_hazard_rejected', handleHazardRejected);
+      };
+    }
+  }, []);
+
+  const handleDismissBulletin = async (id) => {
+    await dismissOfflineRejectedReport(id);
+    setBulletinNotices(prev => prev.filter(n => n.id !== id));
+  };
 
   // Mobile View Segmented Tab State
   const [mobileTab, setMobileTab] = useState('route');
@@ -362,9 +419,17 @@ export default function Home() {
   useEffect(() => {
     async function handleOnlineSync() {
       try {
-        const hazardSync = await syncPendingReportsWhenOnline(async (payload) => {
-          await supabase.from('road_hazards').insert([payload]);
+        // 1. Sync offline hazards with Gemini AI Verification
+        const hazardSync = await syncOfflineHazardsWithAiVerification((result) => {
+          if (result.status === 'rejected') {
+            setBulletinNotices(prev => {
+              if (prev.some(item => item.id === result.id)) return prev;
+              return [result, ...prev];
+            });
+          }
         });
+
+        // 2. Sync pending offline convoys / dispatches
         const shipmentSync = await syncPendingShipmentsWhenOnline(async (payload) => {
           const res = await supabase.from('shipments').insert([payload]).select().maybeSingle();
           return res?.data;
@@ -375,7 +440,7 @@ export default function Home() {
           fetchAllShipments();
           setJourneyNotice({
             type: 'success',
-            message: `✅ Network Restored: Synced ${shipmentSync.syncedCount} convoy(s) & ${hazardSync.syncedCount} hazard(s) with cloud server.`,
+            message: `✅ Network Restored: Verified & synced ${hazardSync.syncedCount} hazard(s) and ${shipmentSync.syncedCount} convoy(s) with cloud server.`,
           });
         }
       } catch (err) {
@@ -739,7 +804,9 @@ export default function Home() {
         <ShipmentsView 
           shipments={shipmentsList}
           onSelectShipmentOnMap={(shipment) => {
-            focusOnMap([parseFloat(shipment.current_lat), parseFloat(shipment.current_lng)], 14, shipment);
+            if (isNodalOfficer || profile?.role === 'nodal_officer') {
+              focusOnMap([parseFloat(shipment.current_lat), parseFloat(shipment.current_lng)], 14, shipment);
+            }
           }} 
         />
       ) : currentView === 'settings' ? (
@@ -798,6 +865,59 @@ export default function Home() {
             </div>
 
           </div>
+
+          {/* ========================================================================= */}
+          {/* AI VERIFICATION BULLETIN BANNER (Offline Reports Rejection Feedback)       */}
+          {/* ========================================================================= */}
+          {bulletinNotices && bulletinNotices.length > 0 && (
+            <div className="space-y-2.5">
+              {bulletinNotices.map((notice) => (
+                <div 
+                  key={notice.id}
+                  className="relative bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-rose-500/15 border border-rose-400/50 dark:border-rose-500/50 rounded-2xl p-4 sm:p-4.5 shadow-md backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-300"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3.5 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 mt-0.5 border border-rose-500/30">
+                        <ShieldAlert className="w-5 h-5" />
+                      </div>
+                      <div className="space-y-1.5 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30">
+                            ⚠️ AI Forensic Bulletin
+                          </span>
+                          <span className="text-xs font-mono text-slate-600 dark:text-slate-300 font-semibold">
+                            {notice.location || 'NER Corridor'}
+                          </span>
+                        </div>
+                        <h4 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                          Offline Hazard Report Not Approved: &ldquo;{notice.title || 'Road Hazard Report'}&rdquo;
+                        </h4>
+                        <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed bg-white/70 dark:bg-slate-900/70 p-3 rounded-xl border border-rose-200/60 dark:border-rose-900/50 mt-1">
+                          <p className="font-semibold text-rose-700 dark:text-rose-300 flex items-center gap-1.5 mb-1">
+                            <span>🔍 Forensic Verification Result:</span>
+                          </p>
+                          <p className="text-slate-800 dark:text-slate-200">
+                            {notice.reason || 'The submitted imagery and textual context did not pass authenticity verification for automatic inclusion in the active safety grid.'}
+                          </p>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 italic pt-0.5">
+                          Note: Your report data remains preserved on this device in the local queue. You can submit a fresh report with clear photos and verified details when online.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDismissBulletin(notice.id)}
+                      className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors shrink-0"
+                      title="Dismiss notice"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* ========================================================================= */}
           {/* 2. SUMMARY METRICS ROW (3 Evenly Distributed Cards: Hubs, Hazards, Convoys) */}

@@ -41,11 +41,13 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
   const [actionNotice, setActionNotice] = useState(null);
   const [viewingShipmentDetails, setViewingShipmentDetails] = useState(null);
 
+  const effectiveIsNodal = Boolean(isNodalOfficer || profile?.role === 'nodal_officer');
+
   // User Profile metadata for Hero Header
-  const displayName = isNodalOfficer 
+  const displayName = effectiveIsNodal 
     ? (nodalOfficer?.officer_name || 'Nodal Authority') 
     : (profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Anuj');
-  const userRoleText = isNodalOfficer 
+  const userRoleText = effectiveIsNodal 
     ? `${nodalOfficer?.state_jurisdiction || 'NER'} • NODAL OPS` 
     : `${profile?.driver_code || user?.user_metadata?.driver_code || '#1524'} • NER OPS`;
   const userInitial = (displayName[0] || 'A').toUpperCase();
@@ -62,10 +64,17 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
     if (isManual) setIsRefreshing(true);
 
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('shipments')
         .select('*')
         .order('created_at', { ascending: false });
+
+      // Privacy: Field operators only fetch their own shipments from DB
+      if (!effectiveIsNodal && user?.id) {
+        query = query.or(`driver_id.eq.${user.id},user_id.eq.${user.id},created_by.eq.${user.id}`);
+      }
+
+      const { data, error } = await query;
 
       let combined = Array.isArray(data) ? [...data] : [];
 
@@ -74,7 +83,8 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         const offlineShipments = await db.offline_shipment_queue.where('synced').equals(0).toArray();
         if (Array.isArray(offlineShipments) && offlineShipments.length > 0) {
           offlineShipments.forEach(offS => {
-            if (!combined.some(s => s.tracking_code === offS.tracking_code || (offS.id && s.id === offS.id))) {
+            const isMine = effectiveIsNodal || (user?.id && (offS.driver_id === user.id || offS.user_id === user.id));
+            if (isMine && !combined.some(s => s.tracking_code === offS.tracking_code || (offS.id && s.id === offS.id))) {
               combined.unshift(offS);
             }
           });
@@ -115,7 +125,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         setTimeout(() => setIsRefreshing(false), 500);
       }
     }
-  }, [shipments]);
+  }, [shipments, effectiveIsNodal, user?.id]);
 
   // Initial load, auto-polling every 4s, and event listeners
   useEffect(() => {
@@ -279,7 +289,31 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
     }
   };
 
-    const displayShipments = liveShipments;
+    // Privacy Scoping: Nodal Officers view all convoys across NER, Field Operators view only their own
+    const displayShipments = useMemo(() => {
+      if (effectiveIsNodal) return liveShipments;
+      return liveShipments.filter((s) => {
+        const isMyDriverId = user?.id && s.driver_id === user.id;
+        const isMyUserId = user?.id && (s.user_id === user.id || s.created_by === user.id);
+        const isMyDriverCode = profile?.driver_code && s.driver_code === profile.driver_code;
+        const isMyDriverName = profile?.full_name && s.driver_name === profile.full_name;
+
+        let isMyLocalJourney = false;
+        if (typeof window !== 'undefined') {
+          try {
+            const cached = localStorage.getItem('ner_active_journey') || localStorage.getItem('ner_active_transit_journey');
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              if (parsed && (parsed.tracking_code === s.tracking_code || (parsed.id && parsed.id === s.id))) {
+                isMyLocalJourney = true;
+              }
+            }
+          } catch (e) {}
+        }
+
+        return isMyDriverId || isMyUserId || isMyDriverCode || isMyDriverName || isMyLocalJourney;
+      });
+    }, [liveShipments, effectiveIsNodal, user?.id, profile?.driver_code, profile?.full_name]);
 
   const inTransitCount = displayShipments.filter((s) => {
     const st = (s.status || '').toLowerCase();
@@ -344,10 +378,12 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
           {/* Left Title & Subtitle */}
           <div className="space-y-1.5 max-w-2xl">
             <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-900 dark:text-white tracking-tight leading-tight drop-shadow-xs">
-              Active Supply Convoys & Shipments
+              {effectiveIsNodal ? 'Active Supply Convoys & Shipments' : 'My Supply Convoys & Dispatches'}
             </h1>
             <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-200 font-medium leading-relaxed drop-shadow-xs max-w-xl">
-              Live GPS telemetry, transit manifest logs, and multimodal delivery dispatch across 8 NER States.
+              {effectiveIsNodal 
+                ? 'Live GPS telemetry, transit manifest logs, and multimodal delivery dispatch across 8 NER States.'
+                : 'Transit manifest logs, active cargo consignments, and delivery execution status.'}
             </p>
           </div>
 
@@ -386,7 +422,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-4.5 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
-              Total Convoys
+              {effectiveIsNodal ? 'Total Convoys' : 'My Convoys'}
             </span>
             <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900 flex items-center justify-center text-blue-600 dark:text-cyan-400">
               <Truck className="w-4 h-4" />
@@ -397,7 +433,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
               {displayShipments.length}
             </span>
             <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-medium">
-              Registered manifests
+              {effectiveIsNodal ? 'Registered manifests' : 'Dispatched manifests'}
             </p>
           </div>
         </div>
@@ -417,8 +453,14 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
               {inTransitCount}
             </span>
             <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 font-bold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-              <span>Live GPS Active</span>
+              {inTransitCount > 0 ? (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
+                  <span>{effectiveIsNodal ? 'Live GPS Active' : 'Transit Active'}</span>
+                </>
+              ) : (
+                <span className="text-slate-400 font-normal">None in transit</span>
+              )}
             </p>
           </div>
         </div>
@@ -438,7 +480,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
               {deliveredCount}
             </span>
             <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-medium">
-              Completed journeys
+              {effectiveIsNodal ? 'Completed journeys' : 'Delivered by you'}
             </p>
           </div>
         </div>
@@ -447,7 +489,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-4.5 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
-              Fleet on Duty
+              {effectiveIsNodal ? 'Fleet on Duty' : 'Operator Status'}
             </span>
             <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/60 border border-purple-100 dark:border-purple-900 flex items-center justify-center text-purple-500">
               <User className="w-4 h-4" />
@@ -455,10 +497,10 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
           </div>
           <div className="mt-2.5">
             <span className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-              {Math.max(1, inTransitCount)}
+              {effectiveIsNodal ? Math.max(1, inTransitCount) : (inTransitCount > 0 ? 'Active' : 'Standby')}
             </span>
             <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-medium">
-              Active operators
+              {effectiveIsNodal ? 'Active operators' : (inTransitCount > 0 ? 'Convoy in motion' : 'Available for dispatch')}
             </p>
           </div>
         </div>
@@ -611,8 +653,8 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
             <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800 p-3 space-y-3">
               {filteredShipments.map((s, idx) => {
                 const isDelivered = (s.status || '').toLowerCase() === 'delivered' || (s.status || '').toLowerCase() === 'completed';
-                const isMine = user?.id && (s.driver_id === user.id || s.user_id === user.id);
-                const canManage = isNodalOfficer || isMine;
+                const isMine = Boolean(user?.id && (s.driver_id === user.id || s.user_id === user.id || s.created_by === user.id));
+                const canManage = effectiveIsNodal || isMine;
 
                 return (
                   <div 
@@ -661,21 +703,23 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                       <span className="text-blue-600 dark:text-cyan-400 font-bold">{s.estimated_eta || 'On Schedule'}</span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (onSelectShipmentOnMap) {
-                            onSelectShipmentOnMap(s);
-                          }
-                        }}
-                        className="py-2 px-3 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs rounded-full border border-blue-200 dark:border-blue-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
-                      >
-                        <Navigation className="w-3.5 h-3.5" />
-                        <span>Locate Convoy</span>
-                      </button>
+                    <div className={`grid ${effectiveIsNodal ? 'grid-cols-2' : 'grid-cols-1'} gap-2 pt-1 border-t border-slate-100 dark:border-slate-800`}>
+                      {effectiveIsNodal && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onSelectShipmentOnMap) {
+                              onSelectShipmentOnMap(s);
+                            }
+                          }}
+                          className="py-2 px-3 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs rounded-full border border-blue-200 dark:border-blue-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
+                        >
+                          <Navigation className="w-3.5 h-3.5" />
+                          <span>Locate Convoy</span>
+                        </button>
+                      )}
 
-                      {!isDelivered ? (
+                      {!isDelivered && canManage ? (
                         <button
                           type="button"
                           onClick={() => handleMarkDelivered(s)}
@@ -684,7 +728,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                           <span>Mark Delivered</span>
                         </button>
-                      ) : (
+                      ) : canManage ? (
                         <button
                           type="button"
                           onClick={() => handleDeleteShipment(s)}
@@ -693,7 +737,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                           <Trash2 className="w-3.5 h-3.5 text-rose-500" />
                           <span>Archive Record</span>
                         </button>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -717,8 +761,8 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                   {filteredShipments.map((s, idx) => {
                     const isDelivered = (s.status || '').toLowerCase() === 'delivered' || (s.status || '').toLowerCase() === 'completed';
-                    const isMine = user?.id && (s.driver_id === user.id || s.user_id === user.id);
-                    const canManage = isNodalOfficer || isMine;
+                    const isMine = Boolean(user?.id && (s.driver_id === user.id || s.user_id === user.id || s.created_by === user.id));
+                    const canManage = effectiveIsNodal || isMine;
 
                     return (
                       <tr 
@@ -784,23 +828,25 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                         <td className="py-4 pr-6 text-right">
                           <div className="inline-flex items-center space-x-2">
                             
-                            {/* Locate Action Button */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (onSelectShipmentOnMap) {
-                                  onSelectShipmentOnMap(s);
-                                }
-                              }}
-                              className="px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs border border-blue-200 dark:border-blue-800 transition-all inline-flex items-center space-x-1.5 cursor-pointer shadow-2xs"
-                              title="Locate live convoy on GIS map"
-                            >
-                              <Navigation className="w-3.5 h-3.5" />
-                              <span>Locate</span>
-                            </button>
+                            {/* Locate Action Button - STRICTLY NODAL OFFICER ONLY */}
+                            {effectiveIsNodal && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (onSelectShipmentOnMap) {
+                                    onSelectShipmentOnMap(s);
+                                  }
+                                }}
+                                className="px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs border border-blue-200 dark:border-blue-800 transition-all inline-flex items-center space-x-1.5 cursor-pointer shadow-2xs"
+                                title="Locate live convoy on GIS map (Nodal Authority Only)"
+                              >
+                                <Navigation className="w-3.5 h-3.5" />
+                                <span>Locate</span>
+                              </button>
+                            )}
 
                             {/* Mark Delivered Action Button */}
-                            {!isDelivered ? (
+                            {!isDelivered && canManage ? (
                               <button
                                 type="button"
                                 onClick={() => handleMarkDelivered(s)}

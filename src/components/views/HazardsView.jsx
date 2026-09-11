@@ -39,7 +39,7 @@ import ReportHazardModal from '@/components/ReportHazardModal';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
 import { estimateNerLocationFallback } from '@/lib/geoUtils';
-import { deleteHazardOffline } from '@/lib/offlineDb';
+import { deleteHazardOffline, getOfflineRejectedReports, dismissOfflineRejectedReport } from '@/lib/offlineDb';
 
 export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
   const { user, profile, isNodalOfficer, nodalOfficer } = useAuth();
@@ -53,6 +53,53 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
     }
     return hazards || [];
   });
+
+  const [bulletinNotices, setBulletinNotices] = useState([]);
+
+  // Load any rejected offline hazard reports on mount & listen for new AI rejections
+  React.useEffect(() => {
+    async function loadRejectedBulletins() {
+      try {
+        const rejected = await getOfflineRejectedReports();
+        if (rejected && rejected.length > 0) {
+          const formatted = rejected.map(r => ({
+            id: r.id,
+            title: r.title || r.notes?.slice(0, 40) || 'Hazard Report',
+            location: `${r.district ? r.district + ', ' : ''}${r.state || 'NER Corridor'}`,
+            status: 'rejected',
+            reason: r.rejection_reason || 'Media evidence or description context did not pass authenticity verification.',
+            created_at: r.created_at
+          }));
+          setBulletinNotices(formatted);
+        }
+      } catch (err) {
+        console.warn('Failed to load offline rejected reports in HazardsView:', err);
+      }
+    }
+
+    loadRejectedBulletins();
+
+    const handleHazardRejected = (e) => {
+      if (e.detail) {
+        setBulletinNotices(prev => {
+          if (prev.some(item => item.id === e.detail.id)) return prev;
+          return [e.detail, ...prev];
+        });
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('ner_offline_hazard_rejected', handleHazardRejected);
+      return () => {
+        window.removeEventListener('ner_offline_hazard_rejected', handleHazardRejected);
+      };
+    }
+  }, []);
+
+  const handleDismissBulletin = async (id) => {
+    await dismissOfflineRejectedReport(id);
+    setBulletinNotices(prev => prev.filter(n => n.id !== id));
+  };
 
   React.useEffect(() => {
     if (Array.isArray(hazards)) {
@@ -293,6 +340,59 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
         </div>
 
       </div>
+
+      {/* ========================================================================= */}
+      {/* AI VERIFICATION BULLETIN BANNER (Offline Reports Rejection Feedback)       */}
+      {/* ========================================================================= */}
+      {bulletinNotices && bulletinNotices.length > 0 && (
+        <div className="space-y-2.5">
+          {bulletinNotices.map((notice) => (
+            <div 
+              key={notice.id}
+              className="relative bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-rose-500/15 border border-rose-400/50 dark:border-rose-500/50 rounded-3xl p-4 sm:p-5 shadow-md backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-300"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3.5 min-w-0">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 mt-0.5 border border-rose-500/30">
+                    <ShieldAlert className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1.5 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30">
+                        ⚠️ AI Verification Bulletin
+                      </span>
+                      <span className="text-xs font-mono text-slate-600 dark:text-slate-300 font-semibold">
+                        {notice.location || 'NER Corridor'}
+                      </span>
+                    </div>
+                    <h4 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                      Offline Hazard Report Rejected: &ldquo;{notice.title || 'Road Hazard Report'}&rdquo;
+                    </h4>
+                    <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed bg-white/70 dark:bg-slate-900/70 p-3 rounded-2xl border border-rose-200/60 dark:border-rose-900/50 mt-1">
+                      <p className="font-semibold text-rose-700 dark:text-rose-300 flex items-center gap-1.5 mb-1">
+                        <span>🔍 Reason for Rejection:</span>
+                      </p>
+                      <p className="text-slate-800 dark:text-slate-200">
+                        {notice.reason || 'The submitted imagery and textual context did not pass authenticity verification.'}
+                      </p>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 italic pt-0.5">
+                      The report is safely retained in your device offline queue. You can review your input or submit a fresh report when connected.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDismissBulletin(notice.id)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors shrink-0"
+                  title="Dismiss bulletin"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* 2. SUMMARY METRICS CARDS ROW (5 Sleek White Cards) */}
