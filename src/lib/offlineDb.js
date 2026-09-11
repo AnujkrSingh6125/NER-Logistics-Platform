@@ -517,10 +517,11 @@ export async function deleteShipmentOffline(shipmentId, trackingCode) {
     if (db.shipments) {
       if (shipmentId) await db.shipments.delete(shipmentId).catch(() => {});
       if (trackingCode) await db.shipments.where('tracking_code').equals(trackingCode).delete().catch(() => {});
+      await db.shipments.filter(s => (shipmentId && (s.id === shipmentId || s.server_id === shipmentId)) || (trackingCode && s.tracking_code === trackingCode)).delete().catch(() => {});
     }
     if (db.offline_shipment_queue) {
-      if (shipmentId) await db.offline_shipment_queue.where('id').equals(shipmentId).delete().catch(() => {});
       if (trackingCode) await db.offline_shipment_queue.where('tracking_code').equals(trackingCode).delete().catch(() => {});
+      await db.offline_shipment_queue.filter(s => (shipmentId && (s.id === shipmentId || s.server_id === shipmentId)) || (trackingCode && s.tracking_code === trackingCode)).delete().catch(() => {});
     }
   } catch (err) {
     console.warn('Dexie: Failed to delete shipment offline:', err);

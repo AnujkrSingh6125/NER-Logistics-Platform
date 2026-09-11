@@ -618,13 +618,24 @@ export default function TacticalHubMapInner({
           });
         }
 
+        // Read deleted shipments cache
+        let delCache = [];
+        if (typeof window !== 'undefined') {
+          try {
+            const sess = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
+            const loc = JSON.parse(localStorage.getItem('ner_deleted_shipments') || '[]');
+            delCache = Array.from(new Set([...sess, ...loc]));
+          } catch (e) {}
+        }
+
         // Check localStorage for active local journey not yet in database
         if (typeof window !== 'undefined') {
           try {
             const cached = localStorage.getItem('ner_active_journey') || localStorage.getItem('ner_active_transit_journey');
             if (cached) {
               const parsed = JSON.parse(cached);
-              if (parsed && (parsed.status === 'IN_TRANSIT' || parsed.status === 'in_transit')) {
+              const isDeleted = delCache.includes(parsed?.id) || (parsed?.tracking_code && delCache.includes(parsed?.tracking_code));
+              if (!isDeleted && parsed && (parsed.status === 'IN_TRANSIT' || parsed.status === 'in_transit')) {
                 const isMine = effectiveIsNodal || (user?.id && parsed.driver_id === user.id);
                 if (isMine && !combined.some(c => (parsed.tracking_code && c.tracking_code === parsed.tracking_code) || (parsed.id && c.id === parsed.id))) {
                   const lat = (userLocation?.coords?.lat) || parsed.current_lat || 26.14;
@@ -655,11 +666,8 @@ export default function TacticalHubMapInner({
         }
 
         // Filter out permanently deleted or terminated shipments
-        if (typeof window !== 'undefined') {
-          try {
-            const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
-            combined = combined.filter(s => !delCache.includes(s.id) && !delCache.includes(s.tracking_code));
-          } catch (e) {}
+        if (delCache.length > 0) {
+          combined = combined.filter(s => !delCache.includes(s.id) && !delCache.includes(s.tracking_code));
         }
 
         setActiveDrivers(combined);

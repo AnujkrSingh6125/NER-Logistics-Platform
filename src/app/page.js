@@ -58,7 +58,8 @@ import {
   syncPendingShipmentsWhenOnline,
   syncOfflineHazardsWithAiVerification,
   getOfflineRejectedReports,
-  dismissOfflineRejectedReport
+  dismissOfflineRejectedReport,
+  deleteShipmentOffline
 } from '@/lib/offlineDb';
 import { calculateSafestMultiRoutes, findHazardsAlongRoute, rescoreRoutesWithHazards } from '@/lib/routingService';
 
@@ -222,6 +223,17 @@ export default function Home() {
         setActiveJourney(null);
         return;
       }
+
+      // Read deleted shipments cache
+      let delCache = [];
+      if (typeof window !== 'undefined') {
+        try {
+          const sess = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
+          const loc = JSON.parse(localStorage.getItem('ner_deleted_shipments') || '[]');
+          delCache = Array.from(new Set([...sess, ...loc]));
+        } catch (e) {}
+      }
+
       try {
         const { data, error } = await supabase
           .from('shipments')
@@ -233,11 +245,14 @@ export default function Home() {
           .maybeSingle();
 
         if (!error && data) {
-          setActiveJourney(data);
-          if (userLocation?.status === 'idle' && userLocation?.startTracking) {
-            userLocation.startTracking();
+          const isDeleted = delCache.includes(data.id) || (data.tracking_code && delCache.includes(data.tracking_code));
+          if (!isDeleted) {
+            setActiveJourney(data);
+            if (userLocation?.status === 'idle' && userLocation?.startTracking) {
+              userLocation.startTracking();
+            }
+            return;
           }
-          return;
         }
       } catch (e) {
         console.warn('Active journey check notice:', e);
@@ -248,11 +263,16 @@ export default function Home() {
           const cached = localStorage.getItem('ner_active_transit_journey') || localStorage.getItem('ner_active_journey');
           if (cached) {
             const parsed = JSON.parse(cached);
-            if (parsed && (parsed.status === 'IN_TRANSIT' || parsed.status === 'in_transit') && (!parsed.driver_id || parsed.driver_id === user.id)) {
+            const isDeleted = delCache.includes(parsed?.id) || (parsed?.tracking_code && delCache.includes(parsed?.tracking_code));
+            if (!isDeleted && parsed && (parsed.status === 'IN_TRANSIT' || parsed.status === 'in_transit') && (!parsed.driver_id || parsed.driver_id === user.id)) {
               setActiveJourney(parsed);
               if (userLocation?.status === 'idle' && userLocation?.startTracking) {
                 userLocation.startTracking();
               }
+            } else if (isDeleted) {
+              localStorage.removeItem('ner_active_transit_journey');
+              localStorage.removeItem('ner_active_journey');
+              setActiveJourney(null);
             }
           }
         } catch (err) {}
@@ -264,6 +284,16 @@ export default function Home() {
   // 1. Fetch Shipments with Dexie + LocalStorage fallbacks
   const fetchAllShipments = useCallback(async () => {
     try {
+      // 1. Read deleted shipments cache from both sessionStorage & localStorage
+      let delCache = [];
+      if (typeof window !== 'undefined') {
+        try {
+          const sess = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
+          const loc = JSON.parse(localStorage.getItem('ner_deleted_shipments') || '[]');
+          delCache = Array.from(new Set([...sess, ...loc]));
+        } catch (e) {}
+      }
+
       let query = supabase
         .from('shipments')
         .select('*')
@@ -277,20 +307,35 @@ export default function Home() {
 
       let combined = Array.isArray(data) ? [...data] : [];
 
-      // Check Dexie IndexedDB for offline shipments
+      // Check Dexie IndexedDB for offline shipments (ignore deleted items)
       try {
         const offlineList = await db.shipments.toArray();
         if (Array.isArray(offlineList) && offlineList.length > 0) {
           offlineList.forEach(off => {
             const isMine = effectiveIsNodal || (user?.id && off.driver_id === user.id);
-            if (isMine && !combined.some(s => s.id === off.id || (off.tracking_code && s.tracking_code === off.tracking_code))) {
+            const isDeleted = delCache.includes(off.id) || (off.tracking_code && delCache.includes(off.tracking_code));
+            if (isMine && !isDeleted && !combined.some(s => s.id === off.id || (off.tracking_code && s.tracking_code === off.tracking_code))) {
               combined.unshift(off);
             }
           });
         }
       } catch (dexErr) {}
 
-      // Check localStorage for any local active journey
+      // Check Dexie offline shipment queue
+      try {
+        const queueList = await db.offline_shipment_queue.where('synced').equals(0).toArray();
+        if (Array.isArray(queueList) && queueList.length > 0) {
+          queueList.forEach(off => {
+            const isMine = effectiveIsNodal || (user?.id && off.driver_id === user.id);
+            const isDeleted = delCache.includes(off.id) || (off.tracking_code && delCache.includes(off.tracking_code));
+            if (isMine && !isDeleted && !combined.some(s => (off.tracking_code && s.tracking_code === off.tracking_code) || (off.id && s.id === off.id))) {
+              combined.unshift(off);
+            }
+          });
+        }
+      } catch (e) {}
+
+      // Check localStorage for active journey (ignore deleted items)
       if (typeof window !== 'undefined') {
         try {
           const cached = localStorage.getItem('ner_active_journey') || localStorage.getItem('ner_active_transit_journey');
@@ -298,10 +343,11 @@ export default function Home() {
             const parsed = JSON.parse(cached);
             if (parsed && parsed.tracking_code) {
               const isMine = effectiveIsNodal || (user?.id && parsed.driver_id === user.id);
+              const isDeleted = delCache.includes(parsed.id) || delCache.includes(parsed.tracking_code);
               const alreadyExists = combined.some(s => 
                 s.tracking_code === parsed.tracking_code || (parsed.id && s.id === parsed.id)
               );
-              if (isMine && !alreadyExists) {
+              if (isMine && !isDeleted && !alreadyExists) {
                 combined.unshift(parsed);
               }
             }
@@ -309,12 +355,9 @@ export default function Home() {
         } catch (e) {}
       }
 
-      // Filter out permanently deleted shipments
-      if (typeof window !== 'undefined') {
-        try {
-          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
-          combined = combined.filter(s => !delCache.includes(s.id) && !delCache.includes(s.tracking_code));
-        } catch (e) {}
+      // Final strict filter of any deleted shipment
+      if (delCache.length > 0) {
+        combined = combined.filter(s => !delCache.includes(s.id) && !delCache.includes(s.tracking_code));
       }
 
       setShipmentsList(combined);
@@ -655,18 +698,56 @@ export default function Home() {
   const handleMarkJourneyDelivered = async () => {
     if (!activeJourney && !user?.id) return;
     setMarkingDelivered(true);
-    setJourneyNotice(null);
+    const journeyToDeliver = { ...activeJourney };
+    const trackingCode = journeyToDeliver?.tracking_code;
+    const journeyId = journeyToDeliver?.id;
+
+    setActiveJourney(null);
+    setJourneyNotice({ type: 'success', message: '✅ Relief cargo delivered safely!' });
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('ner_active_transit_journey');
+        localStorage.removeItem('ner_active_journey');
+        window.dispatchEvent(new CustomEvent('ner_journey_delivered', { detail: { ...journeyToDeliver, status: 'DELIVERED' } }));
+      } catch (e) {}
+    }
+
+    // Optimistically update status in shipmentsList state
+    setShipmentsList(prev => prev.map(s => {
+      if ((journeyId && s.id === journeyId) || (trackingCode && s.tracking_code === trackingCode)) {
+        return { ...s, status: 'DELIVERED', updated_at: new Date().toISOString() };
+      }
+      return s;
+    }));
 
     try {
-      if (activeJourney.id) {
+      if (journeyId) {
         await supabase
           .from('shipments')
           .update({
             status: 'DELIVERED',
             updated_at: new Date().toISOString()
           })
-          .eq('id', activeJourney.id);
+          .eq('id', journeyId);
       }
+      if (trackingCode) {
+        await supabase
+          .from('shipments')
+          .update({
+            status: 'DELIVERED',
+            updated_at: new Date().toISOString()
+          })
+          .eq('tracking_code', trackingCode);
+      }
+
+      // Update Dexie offline DB
+      try {
+        if (db.shipments) {
+          if (journeyId) await db.shipments.update(journeyId, { status: 'DELIVERED' });
+          if (trackingCode) await db.shipments.where('tracking_code').equals(trackingCode).modify({ status: 'DELIVERED' });
+        }
+      } catch (dexErr) {}
 
       if (user?.id) {
         await supabase
@@ -678,14 +759,7 @@ export default function Home() {
           .eq('id', user.id);
       }
 
-      setActiveJourney(null);
-      setJourneyNotice({ type: 'success', message: '✅ Relief cargo delivered safely!' });
-
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('ner_active_transit_journey');
-        localStorage.removeItem('ner_active_journey');
-        window.dispatchEvent(new CustomEvent('ner_journey_delivered', { detail: activeJourney }));
-      }
+      await fetchAllShipments();
     } catch (err) {
       console.error('Error marking delivered:', err);
     } finally {
@@ -693,18 +767,66 @@ export default function Home() {
     }
   };
 
-  // Handler: Terminate Journey
+  // Handler: Terminate & Delete Journey
   const handleDeleteJourney = async () => {
     if (!activeJourney && !user?.id) return;
     setTerminatingJourney(true);
+    const journeyToDelete = { ...activeJourney };
+    const trackingCode = journeyToDelete?.tracking_code;
+    const journeyId = journeyToDelete?.id;
+
+    // 1. Immediately clear active journey state & update local storage
+    setActiveJourney(null);
+    setJourneyNotice({ type: 'info', message: 'Transit journey terminated and convoy record deleted.' });
+
+    // 2. Add to deleted cache in both sessionStorage & localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('ner_active_transit_journey');
+        localStorage.removeItem('ner_active_journey');
+        
+        const sess = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
+        const loc = JSON.parse(localStorage.getItem('ner_deleted_shipments') || '[]');
+        const delCache = Array.from(new Set([...sess, ...loc]));
+        if (journeyId && !delCache.includes(journeyId)) delCache.push(journeyId);
+        if (trackingCode && !delCache.includes(trackingCode)) delCache.push(trackingCode);
+        sessionStorage.setItem('ner_deleted_shipments', JSON.stringify(delCache));
+        localStorage.setItem('ner_deleted_shipments', JSON.stringify(delCache));
+
+        window.dispatchEvent(new CustomEvent('ner_journey_deleted', { detail: { id: journeyId, tracking_code: trackingCode } }));
+        window.dispatchEvent(new CustomEvent('ner_journey_terminated', { detail: { id: journeyId, tracking_code: trackingCode } }));
+      } catch (e) {}
+    }
+
+    // 3. Immediately filter out from shipmentsList state in page.js
+    setShipmentsList(prev => prev.filter(s => s.id !== journeyId && (!trackingCode || s.tracking_code !== trackingCode)));
+
     try {
-      if (activeJourney?.id) {
-        await supabase
-          .from('shipments')
-          .update({ status: 'TERMINATED', updated_at: new Date().toISOString() })
-          .eq('id', activeJourney.id);
+      // 4. Server-side permanent delete via backend API (bypasses RLS)
+      try {
+        await fetch('/api/records/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'shipment', id: journeyId, trackingCode }),
+        });
+      } catch (apiErr) {
+        console.warn('API shipment delete note:', apiErr);
       }
 
+      // 5. Client-side Supabase direct delete / status update
+      if (journeyId) {
+        await supabase.from('shipments').delete().eq('id', journeyId);
+      }
+      if (trackingCode) {
+        await supabase.from('shipments').delete().eq('tracking_code', trackingCode);
+      }
+
+      // 6. Purge from Dexie IndexedDB offline caches
+      try {
+        await deleteShipmentOffline(journeyId, trackingCode);
+      } catch (dexErr) {}
+
+      // 7. Update Driver Profile active duty
       if (user?.id) {
         await supabase
           .from('driver_profiles')
@@ -712,16 +834,9 @@ export default function Home() {
           .eq('id', user.id);
       }
 
-      setActiveJourney(null);
-      setJourneyNotice({ type: 'info', message: 'Transit journey terminated and driver telemetry halted.' });
-
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('ner_active_transit_journey');
-        localStorage.removeItem('ner_active_journey');
-        window.dispatchEvent(new CustomEvent('ner_journey_terminated', { detail: activeJourney }));
-      }
+      await fetchAllShipments();
     } catch (err) {
-      console.error('Error terminating journey:', err);
+      console.error('Error deleting journey:', err);
     } finally {
       setTerminatingJourney(false);
     }
