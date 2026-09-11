@@ -133,6 +133,7 @@ const FALLBACK_50_HUBS = [
 
 export default function Home() {
   const { user, profile, isNodalOfficer, nodalOfficer } = useAuth();
+  const effectiveIsNodal = Boolean(isNodalOfficer || profile?.role === 'nodal_officer');
   const { currentView, setCurrentView, mapFocusTarget, focusOnMap } = useNav();
   const userLocation = useUserLocation();
 
@@ -263,10 +264,16 @@ export default function Home() {
   // 1. Fetch Shipments with Dexie + LocalStorage fallbacks
   const fetchAllShipments = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('shipments')
         .select('*')
         .order('created_at', { ascending: false });
+
+      if (!effectiveIsNodal && user?.id) {
+        query = query.eq('driver_id', user.id);
+      }
+
+      const { data, error } = await query;
 
       let combined = Array.isArray(data) ? [...data] : [];
 
@@ -275,7 +282,8 @@ export default function Home() {
         const offlineList = await db.shipments.toArray();
         if (Array.isArray(offlineList) && offlineList.length > 0) {
           offlineList.forEach(off => {
-            if (!combined.some(s => s.id === off.id || (off.tracking_code && s.tracking_code === off.tracking_code))) {
+            const isMine = effectiveIsNodal || (user?.id && off.driver_id === user.id);
+            if (isMine && !combined.some(s => s.id === off.id || (off.tracking_code && s.tracking_code === off.tracking_code))) {
               combined.unshift(off);
             }
           });
@@ -289,10 +297,11 @@ export default function Home() {
           if (cached) {
             const parsed = JSON.parse(cached);
             if (parsed && parsed.tracking_code) {
+              const isMine = effectiveIsNodal || (user?.id && parsed.driver_id === user.id);
               const alreadyExists = combined.some(s => 
                 s.tracking_code === parsed.tracking_code || (parsed.id && s.id === parsed.id)
               );
-              if (!alreadyExists) {
+              if (isMine && !alreadyExists) {
                 combined.unshift(parsed);
               }
             }
@@ -312,7 +321,7 @@ export default function Home() {
     } catch (err) {
       console.warn('Shipments fetch notice:', err);
     }
-  }, []);
+  }, [effectiveIsNodal, user?.id]);
 
   // 2. Fetch Hazards with Dexie fallback
   const fetchAllHazards = useCallback(async () => {
@@ -459,8 +468,6 @@ export default function Home() {
       };
     }
   }, [fetchAllHazards, fetchAllShipments]);
-
-  const effectiveIsNodal = Boolean(isNodalOfficer || profile?.role === 'nodal_officer');
 
   // Live computed metrics matching ShipmentsView and HazardsView exactly:
   const inTransitConvoysCount = useMemo(() => {
