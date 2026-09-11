@@ -13,6 +13,7 @@ import HazardsView from '@/components/views/HazardsView';
 import HubsView from '@/components/views/HubsView';
 import ShipmentsView from '@/components/views/ShipmentsView';
 import SettingsView from '@/components/views/SettingsView';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import LiveClockWidget from '@/components/LiveClockWidget';
 import RouteNavigator from '@/components/RouteNavigator';
 import TacticalAiChatWidget from '@/components/TacticalAiChatWidget';
@@ -787,35 +788,43 @@ export default function Home() {
     <div className="min-h-screen bg-[#f4f7fb] dark:bg-slate-950 text-slate-800 dark:text-slate-100 py-4 px-3 sm:px-5 lg:px-6 space-y-4 sm:space-y-5 font-sans flex flex-col">
       
       {currentView === 'hazards' ? (
-        <HazardsView 
-          hazards={hazards} 
-          onSelectHazardOnMap={(hazard) => {
-            focusOnMap([parseFloat(hazard.latitude), parseFloat(hazard.longitude)], 15, hazard);
-          }} 
-        />
+        <ErrorBoundary title="Hazard Monitoring View Notice">
+          <HazardsView 
+            hazards={hazards} 
+            onSelectHazardOnMap={(hazard) => {
+              focusOnMap([parseFloat(hazard.latitude), parseFloat(hazard.longitude)], 15, hazard);
+            }} 
+          />
+        </ErrorBoundary>
       ) : currentView === 'hubs' ? (
-        <HubsView 
-          hubs={hubs} 
-          onSelectHubOnMap={(hub) => {
-            focusOnMap([parseFloat(hub.latitude), parseFloat(hub.longitude)], 14, hub);
-          }} 
-        />
+        <ErrorBoundary title="Supply Hubs Directory Notice">
+          <HubsView 
+            hubs={hubs} 
+            onSelectHubOnMap={(hub) => {
+              focusOnMap([parseFloat(hub.latitude), parseFloat(hub.longitude)], 14, hub);
+            }} 
+          />
+        </ErrorBoundary>
       ) : currentView === 'shipments' ? (
-        <ShipmentsView 
-          shipments={shipmentsList}
-          onSelectShipmentOnMap={(shipment) => {
-            if (isNodalOfficer || profile?.role === 'nodal_officer') {
-              const lat = parseFloat(shipment.current_lat || shipment.origin_lat || shipment.current_latitude || 26.14);
-              const lng = parseFloat(shipment.current_lng || shipment.origin_lng || shipment.current_longitude || 91.73);
-              if (!isNaN(lat) && !isNaN(lng)) {
-                setCurrentView('command');
-                focusOnMap([lat, lng], 14, shipment);
+        <ErrorBoundary title="Shipments & Convoys View Notice">
+          <ShipmentsView 
+            shipments={shipmentsList}
+            onSelectShipmentOnMap={(shipment) => {
+              if (isNodalOfficer || profile?.role === 'nodal_officer') {
+                const lat = parseFloat(shipment.current_lat || shipment.origin_lat || shipment.current_latitude || 26.14);
+                const lng = parseFloat(shipment.current_lng || shipment.origin_lng || shipment.current_longitude || 91.73);
+                if (!isNaN(lat) && !isNaN(lng)) {
+                  setCurrentView('command');
+                  focusOnMap([lat, lng], 14, shipment);
+                }
               }
-            }
-          }} 
-        />
+            }} 
+          />
+        </ErrorBoundary>
       ) : currentView === 'settings' ? (
-        <SettingsView />
+        <ErrorBoundary title="Settings View Notice">
+          <SettingsView />
+        </ErrorBoundary>
       ) : (
         <>
           {/* ========================================================================= */}
