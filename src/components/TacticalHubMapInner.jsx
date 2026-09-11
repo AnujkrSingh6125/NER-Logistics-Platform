@@ -1358,43 +1358,7 @@ export default function TacticalHubMapInner({
         )}
       </button>
 
-      {/* Dynamic Map Legend (Adaptive to Role) */}
-      <div className="absolute bottom-3 left-3 z-[400] bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-800 rounded-xl p-2.5 shadow-sm text-[11px] font-mono space-y-1.5 select-none">
-        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">MAP LAYERS</span>
-        <div className="space-y-1 text-[10px] text-slate-800 dark:text-slate-200 font-bold">
-          <div className="flex items-center space-x-2">
-            <span className="w-3 h-3 rounded-full bg-slate-800 border-2 border-white shadow-xs shrink-0" />
-            <span>Supply Hubs ({filteredHubs.length} Facilities)</span>
-          </div>
-          {multiRouteData?.allRoutes && multiRouteData.allRoutes.length > 0 && (
-            <>
-              <div className="flex items-center space-x-2 text-emerald-700 dark:text-emerald-400">
-                <span className="w-3 h-3 rounded-full bg-[#10b981] border-2 border-white shadow-xs shrink-0" />
-                <span>Safe Corridor (SCI &lt; 25)</span>
-              </div>
-              <div className="flex items-center space-x-2 text-amber-700 dark:text-amber-400">
-                <span className="w-3 h-3 rounded-full bg-[#f59e0b] border-2 border-white shadow-xs shrink-0" />
-                <span>Caution Corridor (SCI 25–49)</span>
-              </div>
-              <div className="flex items-center space-x-2 text-rose-700 dark:text-rose-400">
-                <span className="w-3 h-3 rounded-full bg-[#ef4444] border-2 border-white shadow-xs shrink-0" />
-                <span>High Risk Corridor (SCI &ge; 50)</span>
-              </div>
-            </>
-          )}
-          <div className="flex items-center space-x-2 text-red-600 dark:text-red-400">
-            <span className="w-3 h-3 rounded-full bg-red-600 border-2 border-white shadow-xs animate-pulse shrink-0" />
-            <span>Road Hazards ({filteredHazards.length} Active Alerts)</span>
-          </div>
-          {effectiveIsNodal && (
-            <div className="flex items-center space-x-2 text-cyan-700 dark:text-cyan-400">
-              <span className="w-3 h-3 rounded-full bg-slate-900 border-2 border-cyan-400 shadow-xs shrink-0" />
-              <span>Live Fleet Radar ({activeDrivers.length} Convoys)</span>
-            </div>
-          )}
-        </div>
-      </div>
-
+      {/* Map is kept clean with bottom-left overlay legend removed */}
     </div>
   );
 }
