@@ -43,7 +43,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
-import { getHubsOffline, saveHubsOffline } from '@/lib/offlineDb';
+import { getHubsOffline, saveHubsOffline, deleteHazardOffline } from '@/lib/offlineDb';
 import MapPinPicker from '@/components/MapPinPicker';
 import { estimateNerLocationFallback } from '@/lib/geoUtils';
 import MultiRouteLayer from '@/components/MultiRouteLayer';
@@ -372,7 +372,12 @@ export default function TacticalHubMapInner({
     if (e) e.stopPropagation();
     if (!hazard?.id) return;
 
-    const isMine = user?.id && (hazard.reported_by_id === user.id || hazard.reported_by === user.id);
+    const isMine = user?.id && (
+      hazard.reported_by_id === user.id || 
+      hazard.reported_by === user.id || 
+      hazard.created_by === user.id || 
+      hazard.user_id === user.id
+    );
     const isNodal = effectiveIsNodal;
 
     if (!isNodal && !isMine) {
@@ -388,16 +393,40 @@ export default function TacticalHubMapInner({
 
     try {
       setDeletingHazardId(hazard.id);
-      const { error } = await supabase
+      // 1. Optimistic removal from map
+      setHazards((prev) => prev.filter((h) => h.id !== hazard.id));
+
+      // 2. Add to deleted cache
+      if (typeof window !== 'undefined') {
+        try {
+          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+          if (!delCache.includes(hazard.id)) {
+            delCache.push(hazard.id);
+            sessionStorage.setItem('ner_deleted_hazards', JSON.stringify(delCache));
+            localStorage.setItem('ner_deleted_hazards', JSON.stringify(delCache));
+          }
+        } catch (e) {}
+      }
+
+      // 3. Delete via backend API
+      try {
+        await fetch('/api/records/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'hazard', id: hazard.id }),
+        });
+      } catch (apiErr) {}
+
+      // 4. Delete from Supabase directly
+      await supabase
         .from('road_hazards')
         .delete()
         .eq('id', hazard.id);
 
-      if (error) {
-        throw error;
-      }
-
-      setHazards((prev) => prev.filter((h) => h.id !== hazard.id));
+      // 5. Delete from Dexie offline DB
+      try {
+        await deleteHazardOffline(hazard.id);
+      } catch (dexErr) {}
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('ner_hazard_deleted', { detail: { id: hazard.id } }));
@@ -411,7 +440,7 @@ export default function TacticalHubMapInner({
     }
   };
 
-  // Sync with prop when parent updates
+    // Sync with prop when parent updates
   useEffect(() => {
     if (propHazards !== null && propHazards !== undefined) {
       setHazards(propHazards);

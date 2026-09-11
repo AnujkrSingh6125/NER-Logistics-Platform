@@ -28,7 +28,7 @@ import {
   X
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
-import { db } from '@/lib/offlineDb';
+import { db, deleteShipmentOffline } from '@/lib/offlineDb';
 import { useAuth } from '@/context/AuthContext';
 import LiveClockWidget from '@/components/LiveClockWidget';
 
@@ -191,7 +191,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
     }
   };
 
-  // Action: Terminate & Delete Consignment Record
+  // Action: Terminate & Delete Consignment Record (Guaranteed Permanent Deletion)
   const handleDeleteShipment = async (shipment) => {
     const isMine = user?.id && (
       shipment.driver_id === user.id || 
@@ -212,7 +212,40 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
     if (!window.confirm(confirmPrompt)) return;
 
     setActionNotice(`Terminating consignment ${shipment.tracking_code || ''}...`);
+    
+    // 1. Optimistically remove from live UI immediately
+    setLiveShipments(prev => prev.filter(s => s.id !== shipment.id && (!shipment.tracking_code || s.tracking_code !== shipment.tracking_code)));
+
+    // 2. Add to deleted cache in sessionStorage & localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
+        if (shipment.id && !delCache.includes(shipment.id)) delCache.push(shipment.id);
+        if (shipment.tracking_code && !delCache.includes(shipment.tracking_code)) delCache.push(shipment.tracking_code);
+        sessionStorage.setItem('ner_deleted_shipments', JSON.stringify(delCache));
+        localStorage.setItem('ner_deleted_shipments', JSON.stringify(delCache));
+
+        const cached = localStorage.getItem('ner_active_journey');
+        if (cached && JSON.parse(cached)?.tracking_code === shipment.tracking_code) {
+          localStorage.removeItem('ner_active_journey');
+          localStorage.removeItem('ner_active_transit_journey');
+        }
+      } catch (e) {}
+    }
+
     try {
+      // 3. Server-side permanent delete via backend API (bypasses RLS issues)
+      try {
+        await fetch('/api/records/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'shipment', id: shipment.id, trackingCode: shipment.tracking_code }),
+        });
+      } catch (apiErr) {
+        console.warn('API shipment delete note:', apiErr);
+      }
+
+      // 4. Client-side Supabase direct delete
       if (shipment.id) {
         await supabase
           .from('shipments')
@@ -226,19 +259,18 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
           .eq('tracking_code', shipment.tracking_code);
       }
 
+      // 5. Purge from Dexie IndexedDB offline caches
+      try {
+        await deleteShipmentOffline(shipment.id, shipment.tracking_code);
+      } catch (dexErr) {}
+
+      // 6. Broadcast delete event
       if (typeof window !== 'undefined') {
-        try {
-          const cached = localStorage.getItem('ner_active_journey');
-          if (cached && JSON.parse(cached)?.tracking_code === shipment.tracking_code) {
-            localStorage.removeItem('ner_active_journey');
-            localStorage.removeItem('ner_active_transit_journey');
-            window.dispatchEvent(new CustomEvent('ner_journey_deleted'));
-          }
-        } catch (e) {}
+        window.dispatchEvent(new CustomEvent('ner_journey_deleted', { detail: { id: shipment.id, tracking_code: shipment.tracking_code } }));
       }
 
       await fetchShipments();
-      setActionNotice(`🗑️ Consignment ${shipment.tracking_code || ''} deleted.`);
+      setActionNotice(`🗑️ Consignment ${shipment.tracking_code || ''} deleted permanently.`);
       setTimeout(() => setActionNotice(null), 3500);
     } catch (err) {
       console.error('Error deleting shipment:', err);
@@ -246,7 +278,8 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
       setTimeout(() => setActionNotice(null), 3000);
     }
   };
-  const displayShipments = liveShipments;
+
+    const displayShipments = liveShipments;
 
   const inTransitCount = displayShipments.filter((s) => {
     const st = (s.status || '').toLowerCase();

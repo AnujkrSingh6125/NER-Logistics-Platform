@@ -294,3 +294,41 @@ export async function syncPendingShipmentsWhenOnline(insertShipmentFn) {
 
   return { syncedCount, errors };
 }
+
+/**
+ * Permanently delete hazard from Dexie IndexedDB offline caches
+ * @param {string|number} hazardId
+ */
+export async function deleteHazardOffline(hazardId) {
+  if (!hazardId) return;
+  try {
+    if (db.road_hazards) {
+      await db.road_hazards.delete(hazardId).catch(() => {});
+    }
+    if (db.offline_hazard_queue) {
+      await db.offline_hazard_queue.where('id').equals(hazardId).delete().catch(() => {});
+    }
+  } catch (err) {
+    console.warn('Dexie: Failed to delete hazard offline:', err);
+  }
+}
+
+/**
+ * Permanently delete shipment / convoy from Dexie IndexedDB offline caches
+ * @param {string|number} shipmentId
+ * @param {string} trackingCode
+ */
+export async function deleteShipmentOffline(shipmentId, trackingCode) {
+  try {
+    if (db.shipments) {
+      if (shipmentId) await db.shipments.delete(shipmentId).catch(() => {});
+      if (trackingCode) await db.shipments.where('tracking_code').equals(trackingCode).delete().catch(() => {});
+    }
+    if (db.offline_shipment_queue) {
+      if (shipmentId) await db.offline_shipment_queue.where('id').equals(shipmentId).delete().catch(() => {});
+      if (trackingCode) await db.offline_shipment_queue.where('tracking_code').equals(trackingCode).delete().catch(() => {});
+    }
+  } catch (err) {
+    console.warn('Dexie: Failed to delete shipment offline:', err);
+  }
+}

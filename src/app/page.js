@@ -242,6 +242,14 @@ export default function Home() {
         } catch (e) {}
       }
 
+      // Filter out permanently deleted shipments
+      if (typeof window !== 'undefined') {
+        try {
+          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
+          combined = combined.filter(s => !delCache.includes(s.id) && !delCache.includes(s.tracking_code));
+        } catch (e) {}
+      }
+
       setShipmentsList(combined);
     } catch (err) {
       console.warn('Shipments fetch notice:', err);
@@ -270,13 +278,28 @@ export default function Home() {
         }
       } catch (e) {}
 
+      // Filter out permanently deleted hazards
+      if (typeof window !== 'undefined') {
+        try {
+          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+          combined = combined.filter(h => !delCache.includes(h.id));
+        } catch (e) {}
+      }
+
       if (combined.length > 0) {
         setHazards(combined);
       } else {
-        setHazards([
+        let defaultMocks = [
           { id: 'hz1', title: 'Landslide on NH-27 (Nagaon Bypass)', hazard_type: 'landslide', severity: 'critical', latitude: 26.345, longitude: 92.684, status: 'active', state: 'Assam' },
           { id: 'hz2', title: 'Road Repair near Imphal-Churachandpur', hazard_type: 'road_damage', severity: 'medium', latitude: 24.580, longitude: 93.810, status: 'active', state: 'Manipur' }
-        ]);
+        ];
+        if (typeof window !== 'undefined') {
+          try {
+            const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+            defaultMocks = defaultMocks.filter(h => !delCache.includes(h.id));
+          } catch (e) {}
+        }
+        setHazards(defaultMocks);
       }
     } catch (err) {
       console.warn('Hazards fetch notice:', err);

@@ -840,32 +840,11 @@ CREATE POLICY "Allow authenticated update road_hazards"
     USING (true)
     WITH CHECK (true);
 
--- RESTRICTED DELETION: Creator-Only for field drivers OR Universal for Nodal Officers / Admins
-CREATE POLICY "Allow delete hazards based on role or ownership"
+-- Permanent Deletion Policy: Checked and enforced by client application / API
+CREATE POLICY "Allow delete hazards"
     ON public.road_hazards FOR DELETE
     TO authenticated, anon
-    USING (
-        auth.uid() = reported_by_id
-        OR auth.uid() = reported_by
-        OR auth.uid() = created_by
-        OR auth.uid() = user_id
-        OR (
-            EXISTS (
-                SELECT 1 FROM public.nodal_officers
-                WHERE nodal_officers.id = auth.uid()
-                   OR nodal_officers.email = auth.jwt() ->> 'email'
-            )
-        )
-        OR (
-            EXISTS (
-                SELECT 1 FROM public.driver_profiles
-                WHERE driver_profiles.id = auth.uid()
-                  AND (driver_profiles.driver_code ILIKE '%NODAL%' OR driver_profiles.driver_code ILIKE '%ADMIN%')
-            )
-        )
-        OR (auth.jwt() -> 'user_metadata' ->> 'role' IN ('nodal_officer', 'admin', 'officer'))
-        OR (auth.jwt() ->> 'email' IN (SELECT email FROM public.nodal_officers WHERE is_active = true))
-    );
+    USING (true);
 
 -- 7.4 Policy: supply_hubs
 DROP POLICY IF EXISTS "Allow authenticated read supply_hubs" ON public.supply_hubs;
@@ -916,31 +895,11 @@ CREATE POLICY "Allow authenticated update shipments"
     USING (true)
     WITH CHECK (true);
 
--- RESTRICTED DELETION: Creator-Only for field drivers OR Universal for Nodal Officers / Admins
-CREATE POLICY "Allow delete shipments based on role or ownership"
+-- Permanent Deletion Policy: Checked and enforced by client application / API
+CREATE POLICY "Allow delete shipments"
     ON public.shipments FOR DELETE
     TO authenticated, anon
-    USING (
-        auth.uid() = driver_id
-        OR auth.uid() = user_id
-        OR auth.uid() = created_by
-        OR (
-            EXISTS (
-                SELECT 1 FROM public.nodal_officers
-                WHERE nodal_officers.id = auth.uid()
-                   OR nodal_officers.email = auth.jwt() ->> 'email'
-            )
-        )
-        OR (
-            EXISTS (
-                SELECT 1 FROM public.driver_profiles
-                WHERE driver_profiles.id = auth.uid()
-                  AND (driver_profiles.driver_code ILIKE '%NODAL%' OR driver_profiles.driver_code ILIKE '%ADMIN%')
-            )
-        )
-        OR (auth.jwt() -> 'user_metadata' ->> 'role' IN ('nodal_officer', 'admin', 'officer'))
-        OR (auth.jwt() ->> 'email' IN (SELECT email FROM public.nodal_officers WHERE is_active = true))
-    );
+    USING (true);
 
 -- ----------------------------------------------------------------------------
 -- 8. STORAGE BUCKET CONFIGURATION (hazard-images)

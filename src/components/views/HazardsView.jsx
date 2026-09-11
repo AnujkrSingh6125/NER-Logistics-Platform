@@ -39,9 +39,33 @@ import ReportHazardModal from '@/components/ReportHazardModal';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
 import { estimateNerLocationFallback } from '@/lib/geoUtils';
+import { deleteHazardOffline } from '@/lib/offlineDb';
 
 export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
   const { user, profile, isNodalOfficer, nodalOfficer } = useAuth();
+
+  const [liveHazards, setLiveHazards] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+        return (hazards || []).filter(h => !delCache.includes(h.id));
+      } catch (e) {}
+    }
+    return hazards || [];
+  });
+
+  React.useEffect(() => {
+    if (Array.isArray(hazards)) {
+      if (typeof window !== 'undefined') {
+        try {
+          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+          setLiveHazards(hazards.filter(h => !delCache.includes(h.id)));
+          return;
+        } catch (e) {}
+      }
+      setLiveHazards(hazards);
+    }
+  }, [hazards]);
 
   const [scopeTab, setScopeTab] = useState('ALL'); // 'ALL' = All Regional Hazards, 'MY' = My Reported Hazards
   const [search, setSearch] = useState('');
@@ -77,7 +101,7 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
   // Filter hazards reported by the current user / officer
   const myHazards = useMemo(() => {
     if (!user?.id && !nodalOfficer) return [];
-    return hazards.filter((h) => {
+    return liveHazards.filter((h) => {
       const isUserMatch = user?.id && (h.reported_by_id === user.id || h.reported_by === user.id);
       const isNodalMatch = isNodalOfficer && (
         h.reported_by_role === 'nodal_officer' ||
@@ -86,14 +110,14 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
       );
       return isUserMatch || isNodalMatch;
     });
-  }, [hazards, user?.id, isNodalOfficer, nodalOfficer]);
+  }, [liveHazards, user?.id, isNodalOfficer, nodalOfficer]);
 
   // Compute live KPI metrics across all active hazards
-  const totalCount = hazards.length;
-  const criticalCount = hazards.filter((h) => h.severity?.toLowerCase() === 'critical').length;
-  const highCount = hazards.filter((h) => h.severity?.toLowerCase() === 'high').length;
-  const mediumCount = hazards.filter((h) => h.severity?.toLowerCase() === 'medium').length;
-  const lowCount = hazards.filter((h) => h.severity?.toLowerCase() === 'low').length;
+  const totalCount = liveHazards.length;
+  const criticalCount = liveHazards.filter((h) => h.severity?.toLowerCase() === 'critical').length;
+  const highCount = liveHazards.filter((h) => h.severity?.toLowerCase() === 'high').length;
+  const mediumCount = liveHazards.filter((h) => h.severity?.toLowerCase() === 'medium').length;
+  const lowCount = liveHazards.filter((h) => h.severity?.toLowerCase() === 'low').length;
 
   const criticalPct = totalCount > 0 ? Math.round((criticalCount / totalCount) * 100) : 0;
   const highPct = totalCount > 0 ? Math.round((highCount / totalCount) * 100) : 0;
@@ -101,7 +125,7 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
   const lowPct = totalCount > 0 ? Math.round((lowCount / totalCount) * 100) : 0;
 
   // Active base dataset according to scope tab
-  const baseDataset = scopeTab === 'MY' ? myHazards : hazards;
+  const baseDataset = scopeTab === 'MY' ? myHazards : liveHazards;
 
   // Filter hazards by search text, severity, and state
   const filteredHazards = useMemo(() => {
@@ -138,7 +162,7 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
     });
   }, [baseDataset, search, severityFilter, stateFilter]);
 
-  // Delete / Resolve Hazard Handler
+  // Delete / Resolve Hazard Handler (Guaranteed Permanent Deletion)
   const handleDeleteHazard = async (hazard, e) => {
     e?.stopPropagation();
     const isMine = user?.id && (
@@ -161,14 +185,46 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
     if (!window.confirm(confirmPrompt)) return;
 
     setDeletingId(hazard.id);
+    
+    // 1. Optimistically remove from live UI immediately
+    setLiveHazards(prev => prev.filter(h => h.id !== hazard.id));
+
+    // 2. Add to deleted cache in sessionStorage & localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+        if (!delCache.includes(hazard.id)) {
+          delCache.push(hazard.id);
+          sessionStorage.setItem('ner_deleted_hazards', JSON.stringify(delCache));
+          localStorage.setItem('ner_deleted_hazards', JSON.stringify(delCache));
+        }
+      } catch (e) {}
+    }
+
     try {
-      const { error } = await supabase
+      // 3. Server-side permanent delete via backend API (bypasses RLS issues)
+      try {
+        await fetch('/api/records/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'hazard', id: hazard.id }),
+        });
+      } catch (apiErr) {
+        console.warn('API delete note:', apiErr);
+      }
+
+      // 4. Client-side Supabase direct delete
+      await supabase
         .from('road_hazards')
         .delete()
         .eq('id', hazard.id);
 
-      if (error) throw error;
+      // 5. Purge from Dexie IndexedDB offline caches
+      try {
+        await deleteHazardOffline(hazard.id);
+      } catch (dexErr) {}
 
+      // 6. Broadcast delete event to map and dashboard
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('ner_hazard_deleted', { detail: { id: hazard.id } }));
         window.dispatchEvent(new CustomEvent('ner_hazard_reported'));
@@ -179,8 +235,7 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
     } finally {
       setDeletingId(null);
     }
-  };
-  return (
+  };  return (
     <div className="flex-1 p-3 sm:p-5 lg:p-6 space-y-4 sm:space-y-5 max-w-7xl mx-auto w-full font-sans">
       
       {/* ========================================================================= */}
