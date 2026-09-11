@@ -52,14 +52,21 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
     : `${profile?.driver_code || user?.user_metadata?.driver_code || '#1524'} • NER OPS`;
   const userInitial = (displayName[0] || 'A').toUpperCase();
 
-  // Sync prop changes from parent
+  // Sync prop changes from parent (Single Source of Truth)
   useEffect(() => {
-    if (shipments && Array.isArray(shipments)) {
+    if (Array.isArray(shipments)) {
+      if (typeof window !== 'undefined') {
+        try {
+          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
+          setLiveShipments(shipments.filter(s => !delCache.includes(s.id) && !delCache.includes(s.tracking_code)));
+          return;
+        } catch (e) {}
+      }
       setLiveShipments(shipments);
     }
   }, [shipments]);
 
-  // Core fetch function with resilient fallback to Dexie offline queue & localStorage active journey
+  // Dedicated manual or on-demand fetch function
   const fetchShipments = useCallback(async (isManual = false) => {
     if (isManual) setIsRefreshing(true);
 
@@ -75,7 +82,6 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
       }
 
       const { data, error } = await query;
-
       let combined = Array.isArray(data) ? [...data] : [];
 
       // Check Dexie IndexedDB for offline queued shipments
@@ -118,13 +124,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         } catch (e) {}
       }
 
-      if (combined.length > 0) {
-        setLiveShipments(combined);
-      } else if (shipments && Array.isArray(shipments) && shipments.length > 0) {
-        setLiveShipments(shipments);
-      } else {
-        setLiveShipments([]);
-      }
+      setLiveShipments(combined);
     } catch (err) {
       console.warn('Shipments fetch notice:', err);
     } finally {
@@ -132,24 +132,27 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         setTimeout(() => setIsRefreshing(false), 500);
       }
     }
-  }, [shipments, effectiveIsNodal, user?.id]);
+  }, [effectiveIsNodal, user?.id]);
 
-  // Initial load, auto-polling every 4s, and event listeners
+  // Real-time Event Listeners for Zero-Latency Local UI Updates
   useEffect(() => {
-    fetchShipments();
-
-    const channel = supabase
-      .channel('public:shipments_view_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shipments' }, () => {
-        fetchShipments();
-      })
-      .subscribe();
-
-    const pollTimer = setInterval(() => {
+    // Initial fetch if shipments prop is not yet populated
+    if (!shipments || shipments.length === 0) {
       fetchShipments();
-    }, 4000);
+    }
 
-    const handleJourneyStarted = () => fetchShipments();
+    const handleJourneyStarted = (e) => {
+      if (e?.detail) {
+        setLiveShipments(prev => {
+          const exists = prev.some(s => (e.detail.id && s.id === e.detail.id) || (e.detail.tracking_code && s.tracking_code === e.detail.tracking_code));
+          if (exists) return prev.map(s => (e.detail.id && s.id === e.detail.id) || (e.detail.tracking_code && s.tracking_code === e.detail.tracking_code) ? { ...s, ...e.detail } : s);
+          return [e.detail, ...prev];
+        });
+      } else {
+        fetchShipments();
+      }
+    };
+
     const handleJourneyUpdated = (e) => {
       if (e?.detail) {
         const detail = e.detail;
@@ -164,31 +167,58 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
           }
           return s;
         }));
+      }
+    };
+
+    const handleJourneyDelivered = (e) => {
+      if (e?.detail) {
+        setLiveShipments(prev => prev.map(s => {
+          if ((e.detail.id && s.id === e.detail.id) || (e.detail.tracking_code && s.tracking_code === e.detail.tracking_code)) {
+            return { ...s, status: 'DELIVERED', updated_at: new Date().toISOString() };
+          }
+          return s;
+        }));
       } else {
         fetchShipments();
       }
     };
-    const handleJourneyTerminated = () => fetchShipments();
-    const handleJourneyDelivered = () => fetchShipments();
-    const handleJourneyDeleted = () => fetchShipments();
+
+    const handleJourneyTerminated = (e) => {
+      if (e?.detail) {
+        setLiveShipments(prev => prev.map(s => {
+          if ((e.detail.id && s.id === e.detail.id) || (e.detail.tracking_code && s.tracking_code === e.detail.tracking_code)) {
+            return { ...s, status: 'TERMINATED', updated_at: new Date().toISOString() };
+          }
+          return s;
+        }));
+      } else {
+        fetchShipments();
+      }
+    };
+
+    const handleJourneyDeleted = (e) => {
+      if (e?.detail) {
+        setLiveShipments(prev => prev.filter(s => s.id !== e.detail.id && (!e.detail.tracking_code || s.tracking_code !== e.detail.tracking_code)));
+      } else {
+        fetchShipments();
+      }
+    };
 
     if (typeof window !== 'undefined') {
       window.addEventListener('ner_journey_started', handleJourneyStarted);
       window.addEventListener('ner_journey_updated', handleJourneyUpdated);
-      window.addEventListener('ner_journey_terminated', handleJourneyTerminated);
       window.addEventListener('ner_journey_delivered', handleJourneyDelivered);
+      window.addEventListener('ner_journey_terminated', handleJourneyTerminated);
       window.addEventListener('ner_journey_deleted', handleJourneyDeleted);
       return () => {
-        supabase.removeChannel(channel);
-        clearInterval(pollTimer);
         window.removeEventListener('ner_journey_started', handleJourneyStarted);
         window.removeEventListener('ner_journey_updated', handleJourneyUpdated);
-        window.removeEventListener('ner_journey_terminated', handleJourneyTerminated);
         window.removeEventListener('ner_journey_delivered', handleJourneyDelivered);
+        window.removeEventListener('ner_journey_terminated', handleJourneyTerminated);
         window.removeEventListener('ner_journey_deleted', handleJourneyDeleted);
       };
     }
-  }, [fetchShipments]);
+  }, [fetchShipments, shipments]);
 
   // Action: Mark Consignment as Delivered
   const handleMarkDelivered = async (shipment) => {
