@@ -369,19 +369,31 @@ export default function Home() {
   // 2. Fetch Hazards with Dexie fallback
   const fetchAllHazards = useCallback(async () => {
     try {
+      // 1. Read deleted hazards cache from both sessionStorage & localStorage
+      let delCache = [];
+      if (typeof window !== 'undefined') {
+        try {
+          const sess = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+          const loc = JSON.parse(localStorage.getItem('ner_deleted_hazards') || '[]');
+          delCache = Array.from(new Set([...sess, ...loc]));
+        } catch (e) {}
+      }
+
       const { data, error } = await supabase
         .from('road_hazards')
         .select('*')
+        .neq('status', 'resolved')
         .order('created_at', { ascending: false });
 
       let combined = Array.isArray(data) ? [...data] : [];
 
-      // Check Dexie IndexedDB for offline queued hazards
+      // Check Dexie IndexedDB for offline queued hazards (ignore deleted)
       try {
         const offlineHazards = await db.offline_hazard_queue.where('synced').equals(0).toArray();
         if (Array.isArray(offlineHazards) && offlineHazards.length > 0) {
           offlineHazards.forEach(offH => {
-            if (!combined.some(h => h.id === offH.id)) {
+            const isDeleted = delCache.includes(offH.id);
+            if (!isDeleted && !combined.some(h => h.id === offH.id)) {
               combined.unshift(offH);
             }
           });
@@ -389,36 +401,23 @@ export default function Home() {
       } catch (e) {}
 
       // Filter out permanently deleted hazards
-      if (typeof window !== 'undefined') {
-        try {
-          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
-          combined = combined.filter(h => !delCache.includes(h.id));
-        } catch (e) {}
+      if (delCache.length > 0) {
+        combined = combined.filter(h => !delCache.includes(h.id));
       }
 
-      if (combined.length > 0) {
-        setHazards(combined);
-      } else {
-        let defaultMocks = [
-          { id: 'hz1', title: 'Landslide on NH-27 (Nagaon Bypass)', hazard_type: 'landslide', severity: 'critical', latitude: 26.345, longitude: 92.684, status: 'active', state: 'Assam' },
-          { id: 'hz2', title: 'Road Repair near Imphal-Churachandpur', hazard_type: 'road_damage', severity: 'medium', latitude: 24.580, longitude: 93.810, status: 'active', state: 'Manipur' }
-        ];
-        if (typeof window !== 'undefined') {
-          try {
-            const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
-            defaultMocks = defaultMocks.filter(h => !delCache.includes(h.id));
-          } catch (e) {}
-        }
-        setHazards(defaultMocks);
-      }
+      setHazards(combined);
     } catch (err) {
       console.warn('Hazards fetch notice:', err);
       try {
         const offlineHazards = await db.road_hazards.toArray();
         if (offlineHazards && offlineHazards.length > 0) {
-          setHazards(offlineHazards);
+          setHazards(offlineHazards.filter(h => (h.status || '').toLowerCase() !== 'resolved'));
+        } else {
+          setHazards([]);
         }
-      } catch (e) {}
+      } catch (e) {
+        setHazards([]);
+      }
     }
   }, []);
 
@@ -1002,7 +1001,7 @@ export default function Home() {
           <ShipmentsView 
             shipments={shipmentsList}
             onSelectShipmentOnMap={(shipment) => {
-              if (isNodalOfficer || profile?.role === 'nodal_officer') {
+              if (isNodalOfficer || profile?.role === 'nodal_officer' || nodalOfficer) {
                 const lat = parseFloat(shipment.current_lat || shipment.origin_lat || shipment.current_latitude || 26.14);
                 const lng = parseFloat(shipment.current_lng || shipment.origin_lng || shipment.current_longitude || 91.73);
                 if (!isNaN(lat) && !isNaN(lng)) {

@@ -47,7 +47,9 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
   const [liveHazards, setLiveHazards] = useState(() => {
     if (typeof window !== 'undefined') {
       try {
-        const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+        const sess = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+        const loc = JSON.parse(localStorage.getItem('ner_deleted_hazards') || '[]');
+        const delCache = Array.from(new Set([...sess, ...loc]));
         return (hazards || []).filter(h => !delCache.includes(h.id));
       } catch (e) {}
     }
@@ -105,7 +107,9 @@ export default function HazardsView({ hazards = [], onSelectHazardOnMap }) {
     if (Array.isArray(hazards)) {
       if (typeof window !== 'undefined') {
         try {
-          const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+          const sess = JSON.parse(sessionStorage.getItem('ner_deleted_hazards') || '[]');
+          const loc = JSON.parse(localStorage.getItem('ner_deleted_hazards') || '[]');
+          const delCache = Array.from(new Set([...sess, ...loc]));
           setLiveHazards(hazards.filter(h => !delCache.includes(h.id)));
           return;
         } catch (e) {}

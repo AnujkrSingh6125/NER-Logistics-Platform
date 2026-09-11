@@ -43,6 +43,7 @@ export const getShipmentStatus = (status) => {
       isDelivered: true,
       isTerminated: false,
       isInTransit: false,
+      canTrack: false,
       badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
     };
   }
@@ -53,6 +54,7 @@ export const getShipmentStatus = (status) => {
       isDelivered: false,
       isTerminated: true,
       isInTransit: false,
+      canTrack: false,
       badgeClass: 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800',
     };
   }
@@ -63,6 +65,7 @@ export const getShipmentStatus = (status) => {
       isDelivered: false,
       isTerminated: false,
       isInTransit: true,
+      canTrack: true,
       badgeClass: 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-cyan-300 border-blue-200 dark:border-blue-800',
     };
   }
@@ -72,6 +75,7 @@ export const getShipmentStatus = (status) => {
     isDelivered: false,
     isTerminated: false,
     isInTransit: false,
+    canTrack: false,
     badgeClass: 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800',
   };
 };
@@ -85,7 +89,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
   const [actionNotice, setActionNotice] = useState(null);
   const [viewingShipmentDetails, setViewingShipmentDetails] = useState(null);
 
-  const effectiveIsNodal = Boolean(isNodalOfficer || profile?.role === 'nodal_officer');
+  const effectiveIsNodal = Boolean(isNodalOfficer || profile?.role === 'nodal_officer' || nodalOfficer);
 
   // User Profile metadata for Hero Header
   const displayName = effectiveIsNodal 
