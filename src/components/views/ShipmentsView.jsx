@@ -500,9 +500,9 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. SUMMARY METRICS CARDS ROW (5 Sleek White Cards) */}
+      {/* 2. SUMMARY METRICS CARDS ROW (4 Sleek White Cards) */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         
         {/* Card 1: Total Consignments */}
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-4.5 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:shadow-md transition-shadow">
@@ -571,28 +571,8 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
           </div>
         </div>
 
-        {/* Card 4: Active Drivers */}
+        {/* Card 4: Critical Cargoes */}
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-4.5 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
-              {effectiveIsNodal ? 'Fleet on Duty' : 'Operator Status'}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/60 border border-purple-100 dark:border-purple-900 flex items-center justify-center text-purple-500">
-              <User className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-2.5">
-            <span className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-              {effectiveIsNodal ? Math.max(1, inTransitCount) : (inTransitCount > 0 ? 'Active' : 'Standby')}
-            </span>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-medium">
-              {effectiveIsNodal ? 'Active operators' : (inTransitCount > 0 ? 'Convoy in motion' : 'Available for dispatch')}
-            </p>
-          </div>
-        </div>
-
-        {/* Card 5: Critical Cargoes */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-4.5 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:shadow-md transition-shadow col-span-2 sm:col-span-1">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
               Priority Cargo
