@@ -654,6 +654,14 @@ export default function TacticalHubMapInner({
           } catch (e) {}
         }
 
+        // Filter out permanently deleted or terminated shipments
+        if (typeof window !== 'undefined') {
+          try {
+            const delCache = JSON.parse(sessionStorage.getItem('ner_deleted_shipments') || '[]');
+            combined = combined.filter(s => !delCache.includes(s.id) && !delCache.includes(s.tracking_code));
+          } catch (e) {}
+        }
+
         setActiveDrivers(combined);
         if (combined.length === 0) {
           setSelectedRadarDriver(null);

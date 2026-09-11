@@ -25,12 +25,56 @@ import {
   ArrowRight,
   Shield,
   Activity,
-  X
+  X,
+  XCircle
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { db, deleteShipmentOffline } from '@/lib/offlineDb';
 import { useAuth } from '@/context/AuthContext';
 import LiveClockWidget from '@/components/LiveClockWidget';
+
+// Helper to reliably categorize and format convoy status
+export const getShipmentStatus = (status) => {
+  const st = (status || '').toLowerCase().trim();
+  if (st === 'delivered' || st === 'completed') {
+    return {
+      statusKey: 'DELIVERED',
+      label: 'DELIVERED',
+      isDelivered: true,
+      isTerminated: false,
+      isInTransit: false,
+      badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+    };
+  }
+  if (st === 'terminated' || st === 'deleted' || st === 'cancelled') {
+    return {
+      statusKey: 'TERMINATED',
+      label: st === 'deleted' ? 'DELETED' : (st === 'cancelled' ? 'CANCELLED' : 'TERMINATED'),
+      isDelivered: false,
+      isTerminated: true,
+      isInTransit: false,
+      badgeClass: 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+    };
+  }
+  if (st === 'in_transit' || st === 'in-transit' || st === 'active') {
+    return {
+      statusKey: 'IN_TRANSIT',
+      label: 'IN TRANSIT',
+      isDelivered: false,
+      isTerminated: false,
+      isInTransit: true,
+      badgeClass: 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-cyan-300 border-blue-200 dark:border-blue-800',
+    };
+  }
+  return {
+    statusKey: 'PENDING',
+    label: (status || 'SCHEDULED').toUpperCase(),
+    isDelivered: false,
+    isTerminated: false,
+    isInTransit: false,
+    badgeClass: 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+  };
+};
 
 export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap }) {
   const { user, profile, isNodalOfficer, nodalOfficer } = useAuth();
@@ -396,19 +440,17 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
     });
   }, [liveShipments, effectiveIsNodal, user?.id, profile?.driver_code, profile?.full_name]);
 
-  const inTransitCount = displayShipments.filter((s) => {
-    if (!s) return false;
-    const st = (s.status || '').toLowerCase();
-    return st === 'in_transit' || st === 'in-transit' || st === 'active';
-  }).length;
+  const inTransitCount = useMemo(() => {
+    return displayShipments.filter((s) => getShipmentStatus(s?.status).isInTransit).length;
+  }, [displayShipments]);
 
-  const deliveredCount = displayShipments.filter((s) => {
-    if (!s) return false;
-    const st = (s.status || '').toLowerCase();
-    return st === 'delivered' || st === 'completed';
-  }).length;
+  const deliveredCount = useMemo(() => {
+    return displayShipments.filter((s) => getShipmentStatus(s?.status).isDelivered).length;
+  }, [displayShipments]);
 
-  const pendingCount = displayShipments.length - inTransitCount - deliveredCount;
+  const terminatedCount = useMemo(() => {
+    return displayShipments.filter((s) => getShipmentStatus(s?.status).isTerminated).length;
+  }, [displayShipments]);
 
   const filteredShipments = useMemo(() => {
     return displayShipments.filter((s) => {
@@ -428,11 +470,12 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
         codeText.toLowerCase().includes(q) ||
         driverText.toLowerCase().includes(q);
 
-      const st = (s.status || '').toLowerCase();
+      const statusInfo = getShipmentStatus(s.status);
       const matchesStatus = 
         statusFilter === 'ALL' ||
-        (statusFilter === 'in_transit' && (st === 'in_transit' || st === 'in-transit' || st === 'active')) ||
-        (statusFilter === 'delivered' && (st === 'delivered' || st === 'completed'));
+        (statusFilter === 'in_transit' && statusInfo.isInTransit) ||
+        (statusFilter === 'delivered' && statusInfo.isDelivered) ||
+        (statusFilter === 'terminated' && statusInfo.isTerminated);
 
       return matchesSearch && matchesStatus;
     });
@@ -571,22 +614,22 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
           </div>
         </div>
 
-        {/* Card 4: Critical Cargoes */}
+        {/* Card 4: Terminated / Archived */}
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-4.5 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
-              Priority Cargo
+              Terminated / Archived
             </span>
-            <div className="w-8 h-8 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-100 dark:border-cyan-900 flex items-center justify-center text-cyan-600 dark:text-cyan-400">
-              <Package className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-100 dark:border-rose-900 flex items-center justify-center text-rose-500">
+              <XCircle className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-2.5">
-            <span className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-              100%
+            <span className="text-2xl sm:text-3xl font-black text-rose-500 dark:text-rose-400 font-mono">
+              {terminatedCount}
             </span>
-            <p className="text-[10px] text-cyan-600 dark:text-cyan-400 mt-0.5 font-semibold">
-              Medical & Relief Tier
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-medium">
+              {terminatedCount > 0 ? `${terminatedCount} Halted / Archived` : 'Zero halted journeys'}
             </p>
           </div>
         </div>
@@ -606,7 +649,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
       {/* ========================================================================= */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
         
-        {/* Left: 3-Tab Pill Switcher */}
+        {/* Left: 4-Tab Pill Switcher */}
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
@@ -659,6 +702,24 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
               statusFilter === 'delivered' ? 'bg-white/25 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
             }`}>
               {deliveredCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('terminated')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold text-xs transition-all cursor-pointer ${
+              statusFilter === 'terminated'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
+                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/90 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <XCircle className="w-3.5 h-3.5" />
+            <span>Terminated</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+              statusFilter === 'terminated' ? 'bg-white/25 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+            }`}>
+              {terminatedCount}
             </span>
           </button>
         </div>
@@ -718,7 +779,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
             {/* Mobile Card List (< md) */}
             <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800 p-3 space-y-3">
               {filteredShipments.map((s, idx) => {
-                const isDelivered = (s.status || '').toLowerCase() === 'delivered' || (s.status || '').toLowerCase() === 'completed';
+                const statusInfo = getShipmentStatus(s?.status);
                 const isMine = Boolean(user?.id && (s.driver_id === user.id || s.user_id === user.id || s.created_by === user.id));
                 const canManage = effectiveIsNodal || isMine;
 
@@ -744,12 +805,11 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                         </h4>
                       </div>
 
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border shrink-0 ${
-                        isDelivered 
-                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' 
-                          : 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-cyan-300 border-blue-200 dark:border-blue-800'
-                      }`}>
-                        {isDelivered ? 'DELIVERED' : 'IN TRANSIT'}
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border shrink-0 inline-flex items-center gap-1 ${statusInfo.badgeClass}`}>
+                        {statusInfo.isInTransit && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-cyan-400 animate-pulse" />}
+                        {statusInfo.isDelivered && <Check className="w-3 h-3 text-emerald-500" />}
+                        {statusInfo.isTerminated && <X className="w-3 h-3 text-rose-500" />}
+                        <span>{statusInfo.label}</span>
                       </span>
                     </div>
 
@@ -766,11 +826,14 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
 
                     <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 font-mono">
                       <span>GPS: {formatCoord(s.current_lat || s.origin_lat, 26.14)}, {formatCoord(s.current_lng || s.origin_lng, 91.73)}</span>
-                      <span className="text-blue-600 dark:text-cyan-400 font-bold">{s.estimated_eta || 'On Schedule'}</span>
+                      <span className={`${statusInfo.isInTransit ? 'text-blue-600 dark:text-cyan-400 font-bold' : 'text-slate-400'}`}>
+                        {statusInfo.isDelivered ? 'Delivered' : statusInfo.isTerminated ? 'Terminated' : (s.estimated_eta || 'On Schedule')}
+                      </span>
                     </div>
 
-                    <div className={`grid ${effectiveIsNodal ? 'grid-cols-2' : 'grid-cols-1'} gap-2 pt-1 border-t border-slate-100 dark:border-slate-800`}>
-                      {effectiveIsNodal && (
+                    <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      {/* Strictly show Locate ONLY if Nodal Authority AND Convoy is Active In Transit */}
+                      {effectiveIsNodal && statusInfo.canTrack && (
                         <button
                           type="button"
                           onClick={() => {
@@ -778,32 +841,34 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                               onSelectShipmentOnMap(s);
                             }
                           }}
-                          className="py-2 px-3 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs rounded-full border border-blue-200 dark:border-blue-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
+                          className="flex-1 py-2 px-3 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-cyan-400 font-bold text-xs rounded-full border border-blue-200 dark:border-blue-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
                         >
                           <Navigation className="w-3.5 h-3.5" />
                           <span>Locate Convoy</span>
                         </button>
                       )}
 
-                      {!isDelivered && canManage ? (
+                      {statusInfo.isInTransit && canManage && (
                         <button
                           type="button"
                           onClick={() => handleMarkDelivered(s)}
-                          className="py-2 px-3 bg-emerald-50 dark:bg-emerald-950 hover:bg-emerald-100 dark:hover:bg-emerald-900 text-emerald-700 dark:text-emerald-300 font-bold text-xs rounded-full border border-emerald-200 dark:border-emerald-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
+                          className="flex-1 py-2 px-3 bg-emerald-50 dark:bg-emerald-950 hover:bg-emerald-100 dark:hover:bg-emerald-900 text-emerald-700 dark:text-emerald-300 font-bold text-xs rounded-full border border-emerald-200 dark:border-emerald-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                           <span>Mark Delivered</span>
                         </button>
-                      ) : canManage ? (
+                      )}
+
+                      {canManage && (
                         <button
                           type="button"
                           onClick={() => handleDeleteShipment(s)}
-                          className="py-2 px-3 bg-rose-50 dark:bg-rose-950 hover:bg-rose-100 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 font-bold text-xs rounded-full border border-rose-200 dark:border-rose-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
+                          className={`${statusInfo.isInTransit ? 'px-3 py-2' : 'flex-1 py-2 px-3'} bg-rose-50 dark:bg-rose-950 hover:bg-rose-100 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 font-bold text-xs rounded-full border border-rose-200 dark:border-rose-800 transition-colors flex items-center justify-center space-x-1.5 cursor-pointer`}
                         >
                           <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                          <span>Archive Record</span>
+                          <span>{statusInfo.isInTransit ? 'Terminate' : 'Delete Record'}</span>
                         </button>
-                      ) : null}
+                      )}
                     </div>
                   </div>
                 );
@@ -826,7 +891,7 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                   {filteredShipments.map((s, idx) => {
-                    const isDelivered = (s.status || '').toLowerCase() === 'delivered' || (s.status || '').toLowerCase() === 'completed';
+                    const statusInfo = getShipmentStatus(s?.status);
                     const isMine = Boolean(user?.id && (s.driver_id === user.id || s.user_id === user.id || s.created_by === user.id));
                     const canManage = effectiveIsNodal || isMine;
 
@@ -847,13 +912,11 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
 
                         {/* 2. Status Badge */}
                         <td className="py-4 px-3">
-                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border inline-flex items-center gap-1.5 ${
-                            isDelivered 
-                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' 
-                              : 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-cyan-300 border-blue-200 dark:border-blue-800'
-                          }`}>
-                            {!isDelivered && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-cyan-400 animate-pulse" />}
-                            <span>{isDelivered ? 'DELIVERED' : 'IN TRANSIT'}</span>
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border inline-flex items-center gap-1.5 ${statusInfo.badgeClass}`}>
+                            {statusInfo.isInTransit && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-cyan-400 animate-pulse" />}
+                            {statusInfo.isDelivered && <Check className="w-3 h-3 text-emerald-500" />}
+                            {statusInfo.isTerminated && <X className="w-3 h-3 text-rose-500" />}
+                            <span>{statusInfo.label}</span>
                           </span>
                         </td>
 
@@ -894,8 +957,8 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                         <td className="py-4 pr-6 text-right">
                           <div className="inline-flex items-center space-x-2">
                             
-                            {/* Locate Action Button - STRICTLY NODAL OFFICER ONLY */}
-                            {effectiveIsNodal && (
+                            {/* Locate Action Button - STRICTLY NODAL OFFICER ONLY AND ONLY FOR ACTIVE IN-TRANSIT CONVOYS */}
+                            {effectiveIsNodal && statusInfo.canTrack && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -911,8 +974,8 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                               </button>
                             )}
 
-                            {/* Mark Delivered Action Button */}
-                            {!isDelivered && canManage ? (
+                            {/* Mark Delivered Action Button - ONLY ACTIVE IN TRANSIT */}
+                            {statusInfo.isInTransit && canManage ? (
                               <button
                                 type="button"
                                 onClick={() => handleMarkDelivered(s)}
@@ -930,10 +993,10 @@ export default function ShipmentsView({ shipments = null, onSelectShipmentOnMap 
                                 type="button"
                                 onClick={() => handleDeleteShipment(s)}
                                 className="px-3 py-1.5 rounded-full bg-rose-50 dark:bg-rose-950/70 hover:bg-rose-100 dark:hover:bg-rose-900 text-rose-600 dark:text-rose-300 font-bold text-xs border border-rose-200 dark:border-rose-800 transition-all inline-flex items-center space-x-1.5 cursor-pointer"
-                                title="Terminate & Archive Consignment Record"
+                                title={statusInfo.isInTransit ? "Terminate active convoy" : "Delete consignment record permanently"}
                               >
                                 <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                                <span>Terminate</span>
+                                <span>{statusInfo.isInTransit ? 'Terminate' : 'Delete'}</span>
                               </button>
                             ) : null}
 
